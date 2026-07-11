@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: metrobus-realtime
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      # Definir sus VALORES en el panel de Render (Environment), NO aquí.
+      - key: GMAIL_ADDRESS
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: MB_RESEND_URL
+        sync: false
+      - key: MB_RT_URL
+        sync: false

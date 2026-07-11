@@ -1,0 +1,3 @@
+EMAIL_ADDRESS=geometrobus@gmail.com
+EMAIL_APP_PASSWORD=pon_aqui_tu_app_password_de_16_chars
+RESEND_URL=https://metrobus-gtfs.sinopticoplus.com/gtfs-api/senderEmailGtfs/1339/geometrobus@gmail.com

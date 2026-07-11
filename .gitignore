@@ -1,0 +1,14 @@
+# Secretos — nunca al repo
+.env
+backend/config.txt
+backend/email_config.txt
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
