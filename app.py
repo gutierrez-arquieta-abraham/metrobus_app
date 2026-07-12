@@ -58,6 +58,19 @@ CHECK_EVERY_SECONDS = 10
 IMAP_HOST = 'imap.gmail.com'
 SENDER_FILTER = 'sinopticoplus.com'   # el correo llega de noreply@sinopticoplus.com
 
+# Reintento rápido si la renovación falla (en vez de esperar 11.5 h)
+RETRY_ON_ERROR_SECONDS = int(os.environ.get('RETRY_SECONDS', '600'))
+
+# Cabeceras que imitan al navegador/portal para evitar el 403 del "Reenviar"
+BROWSER_HEADERS = {
+    'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                   '(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'),
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+    'Referer': 'https://www.metrobus.cdmx.gob.mx/',
+    'Origin': 'https://www.metrobus.cdmx.gob.mx',
+}
+
 # Estado compartido entre hilos
 _state_lock = threading.Lock()
 _rt_url = os.environ.get('MB_RT_URL', '').strip() or None
@@ -164,7 +177,7 @@ def poll_loop():
 
 def trigger_resend(resend_url):
     log('Solicitando reenvio del correo con el link nuevo...')
-    resp = requests.get(resend_url, timeout=20)
+    resp = requests.get(resend_url, headers=BROWSER_HEADERS, timeout=20)
     resp.raise_for_status()
     log(f'Solicitud de reenvio enviada (status {resp.status_code}).')
 
@@ -251,10 +264,12 @@ def renew_loop(cfg):
     while True:
         try:
             last_uid = renew_once(cfg, last_uid)
+            dormir = RENEW_EVERY_SECONDS
         except Exception as e:
             log(f'Error inesperado en renew_loop: {e}')
-        log(f'Durmiendo {RENEW_EVERY_SECONDS/3600:.1f} h hasta la proxima renovacion...')
-        time.sleep(RENEW_EVERY_SECONDS)
+            dormir = RETRY_ON_ERROR_SECONDS
+        log(f'Durmiendo {dormir/3600:.2f} h hasta el proximo intento...')
+        time.sleep(dormir)
 
 
 def read_renew_config():
