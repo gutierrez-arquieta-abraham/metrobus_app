@@ -40,7 +40,7 @@ import time
 from datetime import datetime
 
 import requests
-from flask import Flask, Response, send_from_directory
+from flask import Flask, Response, request, send_from_directory
 from google.transit import gtfs_realtime_pb2
 
 # ---------------------------------------------------------------------------
@@ -313,6 +313,22 @@ def health():
             'ultimo_feed_timestamp': _last_update_ts,
             'renovacion_activa': read_renew_config() is not None,
         }
+
+
+@app.route('/admin/rt_url', methods=['POST'])
+def admin_set_rt_url():
+    """Recibe un link Realtime fresco (desde el renovador de casa) y lo aplica
+    en caliente. Protegido con ADMIN_TOKEN (cabecera X-Admin-Token)."""
+    token = os.environ.get('ADMIN_TOKEN', '')
+    if not token or request.headers.get('X-Admin-Token', '') != token:
+        return {'ok': False, 'error': 'token invalido'}, 403
+    data = request.get_json(silent=True) or {}
+    url = (data.get('url') or '').strip()
+    if not url:
+        return {'ok': False, 'error': 'url vacio'}, 400
+    set_rt_url(url)
+    log('MB_RT_URL actualizada via /admin/rt_url')
+    return {'ok': True}
 
 
 @app.route('/<path:path>')
