@@ -5,15 +5,21 @@ Metrobús CDMX — mapa en tiempo real (proceso único, listo para desplegar)
 Sirve la web (index.html + data/) y expone /data/vehicles.json con las
 posiciones en vivo de las unidades.
 
-Fuente de datos en vivo — API oficial de Sonda (recomendado):
+Fuente de datos en vivo — API oficial de Sonda:
   Cada REFRESH_SECONDS hace POST a partnerValidation con usuario/senha y
   obtiene una urlRealTime fresca (el .proto, válido 10 min). Luego el poll
   descarga ese .proto cada POLL_SECONDS. Totalmente automático en la nube.
+
+Catálogo de modelos:
+  /data/modelos.csv sirve el catálogo (economico,marca,modelo). Si defines
+  MODELOS_SHEET_URL (CSV publicado de un Google Sheet) lo proxea; si no,
+  sirve data/modelos.csv del repo.
 
 Variables de entorno:
   PORT               (lo pone la plataforma; local 8000)
   PARTNER_USER       usuario de la API GTFS de Sonda
   PARTNER_PASS       contraseña (senha) de la API GTFS de Sonda
+  MODELOS_SHEET_URL  (opcional) CSV publicado de un Google Sheet con modelos
   MB_RT_URL          (opcional/fallback) link .proto de 12 h ya firmado
   ADMIN_TOKEN        (opcional/fallback) token para POST /admin/rt_url
 
@@ -33,10 +39,6 @@ import requests
 from flask import Flask, Response, request, send_from_directory
 from google.transit import gtfs_realtime_pb2
 
-# ---------------------------------------------------------------------------
-# Rutas y configuración
-# ---------------------------------------------------------------------------
-
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, 'data')
 
@@ -49,10 +51,11 @@ IMAP_HOST = 'imap.gmail.com'
 SENDER_FILTER = 'sinopticoplus.com'
 RETRY_ON_ERROR_SECONDS = int(os.environ.get('RETRY_SECONDS', '600'))
 
-# API oficial de Sonda: POST usuario/senha -> URLs frescas (la RT dura 10 min).
 PARTNER_URL = os.environ.get('PARTNER_URL',
                              'https://metrobus-gtfs.sinopticoplus.com/gtfs-api/partnerValidation')
-REFRESH_SECONDS = int(os.environ.get('REFRESH_SECONDS', '540'))   # renueva la urlRealTime cada 9 min
+REFRESH_SECONDS = int(os.environ.get('REFRESH_SECONDS', '540'))
+
+MODELOS_SHEET_URL = os.environ.get('MODELOS_SHEET_URL', '').strip()
 
 BROWSER_HEADERS = {
     'User-Agent': ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -63,7 +66,6 @@ BROWSER_HEADERS = {
     'Origin': 'https://metrobus-gtfs.sinopticoplus.com',
 }
 
-# Estado compartido entre hilos
 _state_lock = threading.Lock()
 _rt_url = os.environ.get('MB_RT_URL', '').strip() or None
 _vehicles_json = None
@@ -88,10 +90,6 @@ def set_rt_url(url):
         _rt_url = url
 
 
-# ---------------------------------------------------------------------------
-# API oficial: partnerValidation -> urlRealTime
-# ---------------------------------------------------------------------------
-
 def partner_config():
     u = os.environ.get('PARTNER_USER', '').strip()
     p = os.environ.get('PARTNER_PASS', '').strip()
@@ -99,7 +97,6 @@ def partner_config():
 
 
 def refresh_rt_url_from_api():
-    """Pide una urlRealTime fresca a la API oficial (POST usuario/senha)."""
     creds = partner_config()
     if not creds:
         return False
@@ -135,10 +132,6 @@ def api_refresh_loop():
             log(f'[!] Error inesperado en api_refresh_loop: {e}')
         time.sleep(REFRESH_SECONDS)
 
-
-# ---------------------------------------------------------------------------
-# Polling del feed GTFS-RT  ->  vehicles.json en memoria
-# ---------------------------------------------------------------------------
 
 def load_routes_lookup():
     with open(os.path.join(DATA_DIR, 'routes.json'), encoding='utf-8') as f:
@@ -209,13 +202,9 @@ def poll_loop():
         except Exception as e:
             log(f'[!] Error inesperado en poll_loop: {e}')
         if not ok and partner_config():
-            refresh_rt_url_from_api()   # la urlRealTime pudo expirar (10 min): renueva ya
+            refresh_rt_url_from_api()
         time.sleep(POLL_SECONDS)
 
-
-# ---------------------------------------------------------------------------
-# Fallback: bot de renovación por correo (solo si no hay PARTNER_USER/PASS)
-# ---------------------------------------------------------------------------
 
 def trigger_resend(resend_url):
     log('Solicitando reenvio del correo con el link nuevo...')
@@ -315,10 +304,6 @@ def read_renew_config():
     return None
 
 
-# ---------------------------------------------------------------------------
-# Rutas HTTP
-# ---------------------------------------------------------------------------
-
 @app.route('/')
 def index():
     return send_from_directory(APP_DIR, 'index.html')
@@ -334,6 +319,24 @@ def vehicles():
                     headers={'Cache-Control': 'no-store'})
 
 
+@app.route('/data/modelos.csv')
+def modelos_csv():
+    if MODELOS_SHEET_URL:
+        try:
+            resp = requests.get(MODELOS_SHEET_URL, timeout=15)
+            if resp.status_code == 200 and resp.text.strip():
+                return Response(resp.text, mimetype='text/csv',
+                                headers={'Cache-Control': 'no-store'})
+            log(f'[!] MODELOS_SHEET_URL status {resp.status_code}')
+        except Exception as e:
+            log(f'[!] Error leyendo MODELOS_SHEET_URL: {e}')
+    try:
+        return send_from_directory(DATA_DIR, 'modelos.csv', mimetype='text/csv')
+    except Exception:
+        return Response('economico,marca,modelo\n', mimetype='text/csv',
+                        headers={'Cache-Control': 'no-store'})
+
+
 @app.route('/health')
 def health():
     with _state_lock:
@@ -341,6 +344,7 @@ def health():
             'rt_url_configurada': _rt_url is not None,
             'ultimo_feed_timestamp': _last_update_ts,
             'modo': 'api' if partner_config() else 'manual',
+            'modelos': 'sheet' if MODELOS_SHEET_URL else 'archivo',
         }
 
 
@@ -363,15 +367,11 @@ def static_files(path):
     return send_from_directory(APP_DIR, path)
 
 
-# ---------------------------------------------------------------------------
-# Arranque
-# ---------------------------------------------------------------------------
-
 def start_background_workers():
     threading.Thread(target=poll_loop, daemon=True).start()
 
     if partner_config():
-        refresh_rt_url_from_api()   # arranca ya con datos
+        refresh_rt_url_from_api()
         threading.Thread(target=api_refresh_loop, daemon=True).start()
         log('[i] Modo API oficial activo (partnerValidation cada %ds).' % REFRESH_SECONDS)
         return
