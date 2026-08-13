@@ -1,4 +1,6 @@
-flask
-requests
-gtfs-realtime-bindings
-protobuf
+Flask>=3.0
+requests>=2.31
+gtfs-realtime-bindings>=1.0.0
+protobuf>=4.25
+firebase-admin>=6.5
+beautifulsoup4>=4.12
