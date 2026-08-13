@@ -141,7 +141,12 @@ def _num(s):
 
 
 def _get(url):
-    return requests.get(url, timeout=15, headers=HEADERS).text
+    # Los sitios del gobierno CDMX bloquean IPs fuera de México (Railway sale por EE.UU.).
+    # Si defines MB_PROXY (proxy con salida en México), SOLO estas peticiones pasan por él;
+    # Firebase y el feed de unidades siguen directos. Ej.: MB_PROXY=http://user:pass@host:puerto
+    proxy = os.environ.get("MB_PROXY", "").strip()
+    proxies = {"http": proxy, "https": proxy} if proxy else None
+    return requests.get(url, timeout=20, headers=HEADERS, proxies=proxies).text
 
 
 def _vigente_hoy(periodo):
