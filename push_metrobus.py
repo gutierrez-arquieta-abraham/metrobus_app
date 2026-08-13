@@ -140,23 +140,63 @@ def _num(s):
     return int(m.group()) if m else 0
 
 
+# --- Proxies con salida en México (los sitios del gobierno bloquean la IP de Railway/EE.UU.) ---
+# Fuente auto-descargable de proxies MX en TEXTO PLANO (ip:puerto por línea). ProxyScrape da los
+# mismos proxies gratis que ProxyNova pero legibles (ProxyNova ofusca las IPs con JS). Configurable.
+PROXY_SRC = os.environ.get(
+    "MB_PROXY_SRC",
+    "https://api.proxyscrape.com/v2/?request=getproxies&protocol=http&timeout=10000&country=MX")
+
+_proxy_ok = None          # último proxy que funcionó: se prueba primero
+_proxy_cache = []         # lista auto-descargada
+_proxy_cache_ts = 0.0
+_RE_IPPORT = re.compile(r"^\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}$")
+
+
+def _descargar_proxies():
+    """Baja una lista fresca de proxies MX (texto ip:puerto). Se pide directo, sin proxy."""
+    global _proxy_cache, _proxy_cache_ts
+    try:
+        txt = requests.get(PROXY_SRC, timeout=15, headers=HEADERS).text
+        _proxy_cache = ["http://" + ln.strip() for ln in txt.splitlines()
+                        if _RE_IPPORT.match(ln.strip())]
+        _proxy_cache_ts = time.time()
+    except Exception as e:
+        print("push: no se pudo bajar lista de proxies:", e)
+    return _proxy_cache
+
+
+def _candidatos():
+    """Orden de prueba: MB_PROXY (manuales) -> el que funcionó antes -> lista auto (refresca 30 min)."""
+    cand = [p.strip() for p in os.environ.get("MB_PROXY", "").split(",") if p.strip()]
+    if _proxy_ok and _proxy_ok not in cand:
+        cand.insert(0, _proxy_ok)
+    if not _proxy_cache or time.time() - _proxy_cache_ts > 1800:
+        _descargar_proxies()
+    for p in _proxy_cache:
+        if p not in cand:
+            cand.append(p)
+    return cand
+
+
 def _get(url):
-    # Los sitios del gobierno CDMX bloquean IPs fuera de México (Railway sale por EE.UU.).
-    # MB_PROXY = uno o VARIOS proxies con salida en México, separados por coma. Se prueban en
-    # orden y se usa el primero que responda (así un proxy gratuito muerto no rompe el monitor).
-    # SOLO estas peticiones pasan por proxy; Firebase y el feed de unidades siguen directos.
-    # Ej.: MB_PROXY=http://host1:puerto,http://user:pass@host2:puerto
-    lista = [p.strip() for p in os.environ.get("MB_PROXY", "").split(",") if p.strip()]
-    if not lista:
-        return requests.get(url, timeout=20, headers=HEADERS).text
+    """Descarga la página del gobierno probando proxies MX; recuerda el que funciona.
+    SOLO estas peticiones pasan por proxy; Firebase y el feed de unidades siguen directos."""
+    global _proxy_ok
+    cand = _candidatos()
+    if not cand:
+        return requests.get(url, timeout=20, headers=HEADERS).text   # directo (sin proxies configurados)
     ultimo = None
-    for p in lista:
+    for p in cand[:25]:                      # tope: no gastar el ciclo probando cientos de proxies muertos
         try:
-            return requests.get(url, timeout=20, headers=HEADERS,
-                                proxies={"http": p, "https": p}).text
+            txt = requests.get(url, timeout=(6, 15), headers=HEADERS,
+                               proxies={"http": p, "https": p}).text
+            _proxy_ok = p                    # este sirvió: úsalo primero la próxima vez
+            return txt
         except Exception as e:
             ultimo = e
-    raise ultimo
+    _proxy_ok = None
+    raise ultimo if ultimo else RuntimeError("sin proxy disponible")
 
 
 def _vigente_hoy(periodo):
