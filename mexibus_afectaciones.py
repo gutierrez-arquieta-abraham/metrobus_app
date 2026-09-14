@@ -134,13 +134,20 @@ def estado_de(tn: str) -> str:
     return "Afectación en el servicio"
 
 # ------------------------------------------------------------------- lugar (zona/estación)
+# Antes el corte era solo por [,.;\n] con un tope duro de 35 caracteres: si la coma quedaba más
+# lejos que eso (p. ej. "a la altura de la Estación Laureles y Clínica 93 POR TRABAJOS DE
+# reencarpetamiento, ...") el lugar salía cortado a la mitad de una palabra ("...93 po"). Ahora
+# la captura es perezosa y también se detiene en conectores comunes ("por", "debido a", etc.)
+# aunque la coma esté lejos, y se le quita el artículo inicial ("la Estación..." -> "Estación...").
+_LUGAR_FIN = r"(?:[,.;\n]|\s+(?:por|debido|ya que|mientras|hasta|se\s)\b)"
+
 def lugar_de(texto: str) -> str:
-    for rx in [r"a la altura de ([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][\wáéíóúñ.\- ]{2,35})",
-               r"zona de ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35})",
-               r"estaci[oó]n(?:es)? ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35})"]:
+    for rx in [r"a la altura de ([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)",
+               r"zona de ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)",
+               r"estaci[oó]n(?:es)? ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)"]:
         m = re.search(rx, texto)
         if m:
-            return re.split(r"[,.;\n]", m.group(1))[0].strip()
+            return re.sub(r"^(el|la|los|las)\s+", "", m.group(1).strip(), flags=re.I)
     return ""
 
 # ------------------------------------------------------------------- info (detalle limpio)
@@ -194,6 +201,14 @@ def fetch_posts():
     return fetch_posts_rss()       # por defecto: RSS
 
 # --- RSS (RSS.app u otro puente de la cuenta de X/FB) -------------------------------------
+# Si un feed falla (p. ej. RSS.app devolviendo 402 "Payment Required" porque la cuenta se quedó
+# sin plan/cupo), reintentar cada POLL_SECONDS lo único que logra es llenar el log de warnings
+# idénticos y gastar peticiones contra un servicio que ya sabemos que va a fallar. Cada URL entra
+# en un "cooldown" que crece (backoff exponencial, tope RSS_BACKOFF_MAX_S) mientras siga fallando,
+# y se resetea en cuanto vuelve a responder bien.
+RSS_BACKOFF_MAX_S = 1800   # tope de espera entre reintentos por feed (30 min)
+_rss_estado = {}           # url -> {"proximo": epoch del próximo intento permitido, "fallos": int}
+
 def fetch_posts_rss():
     """Lee uno o VARIOS feeds RSS (RSS_URL separados por coma) y usa el título como texto."""
     import requests, xml.etree.ElementTree as ET
@@ -202,12 +217,21 @@ def fetch_posts_rss():
     if not urls:
         raise RuntimeError("Falta RSS_URL")
     out = []
+    ahora = time.time()
     for url in urls:
+        st = _rss_estado.get(url, {"proximo": 0, "fallos": 0})
+        if ahora < st["proximo"]:
+            continue   # en cooldown tras fallos repetidos: no insiste este ciclo
         try:
             r = requests.get(url, timeout=20); r.raise_for_status()
             root = ET.fromstring(r.content)
+            _rss_estado[url] = {"proximo": 0, "fallos": 0}   # se recuperó
         except Exception as e:
-            print(f"[warn] RSS {url}: {e}"); continue
+            fallos = st["fallos"] + 1
+            espera = min(RSS_BACKOFF_MAX_S, POLL_SECONDS * (2 ** min(fallos, 6)))
+            _rss_estado[url] = {"proximo": ahora + espera, "fallos": fallos}
+            print(f"[warn] RSS {url}: {e} (reintenta en {int(espera)}s)")
+            continue
         for item in root.iter("item"):
             titulo = item.findtext("title") or ""
             # La DESCRIPCIÓN conserva los saltos de línea (<br>) → tramos del circuito en líneas aparte.
