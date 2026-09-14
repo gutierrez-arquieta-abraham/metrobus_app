@@ -1,13 +1,32 @@
 # Secretos — nunca al repo
 .env
+*.env
+!.env.example
 backend/config.txt
 backend/email_config.txt
+*.pem
+*.p12
+*.pfx
+*.key
+*.jks
+*.keystore
+firebase.json
+firebase-*.json
+*service*account*.json
+kyc_store.json
+admincert/
 
 # Python
 __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Datos generados / caché
+tts_cache/
+*.bak
+*.bak.*
+app.py.bak.*
 
 # Sistema
 .DS_Store

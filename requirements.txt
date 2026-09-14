@@ -1,6 +1,18 @@
-Flask>=3.0
+# === Backend GeoMB / EC2 — dependencias completas ===
+# Servidor principal (app.py, Flask): sirve la web + /data/vehicles.json en vivo.
+flask>=3.0
 requests>=2.31
-gtfs-realtime-bindings>=1.0.0
-protobuf>=4.25
+gtfs-realtime-bindings>=1.0        # provee google.transit.gtfs_realtime_pb2 (jala protobuf)
+
+# Push FCM (push_metrobus.py) + scraping de afectaciones/elevadores.
 firebase-admin>=6.5
-beautifulsoup4>=4.12
+beautifulsoup4>=4.12               # provee bs4
+
+# Voz TTS (tts_backend.py — AWS Polly, voz Mia). Requiere credenciales AWS en el entorno.
+boto3>=1.34
+
+# Servicio de afectaciones Mexibús (mexibus_afectaciones.py):
+# funciona como script/daemon con lo de arriba. Solo si además expones su webhook
+# FastAPI (AFECT_SOURCE=webhook), descomenta:
+# fastapi>=0.110
+# uvicorn>=0.29

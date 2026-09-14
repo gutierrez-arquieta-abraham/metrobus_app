@@ -42,6 +42,11 @@ URL_ESTADO = ("https://incidentesmovilidad.cdmx.gob.mx/public/"
 URL_SERVICIOMB = "https://www.metrobus.cdmx.gob.mx/ServicioMB"
 INTERVALO_SEG = 60
 
+# Estado de Metrobús para el PANEL persistente de la app: app.py lo mezcla en
+# /data/afectaciones_mexibus.json (junto con Mexibús y los avisos manuales). Configurable.
+AFECT_MTB_OUT = os.environ.get("AFECT_MTB_OUT", "").strip() \
+    or "/home/ubuntu/metrobus_app/data/afect_metrobus.json"
+
 TEMA_AFECTA = "afectaciones"
 TEMA_ELEVA = "elevadores"
 TEMA_ACTUALIZA = "actualizaciones"
@@ -77,6 +82,20 @@ def _push(tema, tipo, linea, estado, lugar, info):
               "lugar": lugar or "", "info": info or ""},
         android=messaging.AndroidConfig(priority="high"),
     ))
+
+
+def _escribir_estado_metrobus(filas):
+    """Snapshot del estado por línea (solo las afectadas) para el panel persistente. app.py
+       lo mezcla al servir /data/afectaciones_mexibus.json. Escritura atómica, best-effort."""
+    try:
+        data = {"actualizado": int(time.time()), "afectaciones": filas}
+        os.makedirs(os.path.dirname(AFECT_MTB_OUT), exist_ok=True)
+        tmp = AFECT_MTB_OUT + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False)
+        os.replace(tmp, AFECT_MTB_OUT)
+    except Exception as e:
+        print("push: no se pudo escribir estado metrobus:", e)
 
 
 def enviar_actualizacion(titulo, texto, version_code=""):
@@ -180,23 +199,26 @@ def _candidatos():
 
 
 def _get(url):
-    """Descarga la página del gobierno probando proxies MX; recuerda el que funciona.
-    SOLO estas peticiones pasan por proxy; Firebase y el feed de unidades siguen directos."""
+    """Lee la página del gobierno. Intenta DIRECTO primero (funciona desde México, p. ej. AWS
+    mx-central-1: rápido y confiable). Solo si el directo falla (IP fuera de México, como Railway)
+    cae a proxies MX (los de MB_PROXY y luego la lista auto-descargada). Firebase y el feed de
+    unidades siempre van directos."""
     global _proxy_ok
-    cand = _candidatos()
-    if not cand:
-        return requests.get(url, timeout=20, headers=HEADERS).text   # directo (sin proxies configurados)
-    ultimo = None
-    for p in cand[:25]:                      # tope: no gastar el ciclo probando cientos de proxies muertos
+    err = None
+    try:
+        return requests.get(url, timeout=20, headers=HEADERS).text
+    except Exception as e:
+        err = e
+    for p in _candidatos()[:25]:             # tope: no gastar el ciclo probando cientos de muertos
         try:
             txt = requests.get(url, timeout=(6, 15), headers=HEADERS,
                                proxies={"http": p, "https": p}).text
             _proxy_ok = p                    # este sirvió: úsalo primero la próxima vez
             return txt
-        except Exception as e:
-            ultimo = e
+        except Exception:
+            pass
     _proxy_ok = None
-    raise ultimo if ultimo else RuntimeError("sin proxy disponible")
+    raise err
 
 
 def _vigente_hoy(periodo):
@@ -278,17 +300,21 @@ def _ciclo():
 
     # 1) Estado del Servicio -> tema afectaciones (nueva/cambiada/restablecida)
     est_actual = {}
+    estado_filas = []   # snapshot del estado actual para el panel persistente (lo sirve app.py)
     for f in leer_estado():
         ln = f["linea"]
         if ln <= 0 or _es_normal(f["estado"], f["estaciones"]):
             continue
         clave = f"{ln}|{_norm(f['estado'])}|{_norm(f['estaciones'])}"
         est_actual[ln] = clave
+        estado_filas.append({"linea": ln, "estado": f["estado"],
+                             "lugar": f["estaciones"], "info": f["info"]})
         if _prev["estado"].get(ln) != clave:
             _push(TEMA_AFECTA, "afectacion", ln, f["estado"], f["estaciones"], f["info"])
     for ln in list(_prev["estado"].keys()):
         if ln not in est_actual:
             _push(TEMA_AFECTA, "afectacion", ln, "Servicio restablecido", "", "")
+    _escribir_estado_metrobus(estado_filas)   # persiste el estado (afectadas) para el panel
 
     # 2) Elevadores y mantenimiento
     eleva, manten = leer_tablas()

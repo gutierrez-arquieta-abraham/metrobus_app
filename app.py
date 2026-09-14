@@ -49,6 +49,13 @@ except Exception as _e_push:
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, 'data')
+# Panel de afectaciones: el feed (mexibus_afectaciones) escribe FEED_AFECT; los avisos
+# manuales (admin_afect) van a MANUAL_AFECT con 'expira'. /data/afectaciones_mexibus.json
+# se sirve MEZCLANDO ambos (el manual gana mientras no venza). Ajusta AFECT_MXB_OUT si el
+# feed escribe en otra ruta.
+FEED_AFECT = os.environ.get('AFECT_MXB_OUT', '').strip() or os.path.join(DATA_DIR, 'afectaciones_mexibus.json')
+FEED_METRO = os.environ.get('AFECT_MTB_OUT', '').strip() or os.path.join(DATA_DIR, 'afect_metrobus.json')
+MANUAL_AFECT = os.environ.get('AFECT_MANUAL_FILE', '').strip() or os.path.join(DATA_DIR, 'afect_manual.json')
 POLL_SECONDS = int(os.environ.get('POLL_SECONDS', '15'))
 RENEW_EVERY_SECONDS = int(float(os.environ.get('RENEW_HOURS', '11.5')) * 3600)
 WAIT_FOR_EMAIL_SECONDS = 180
@@ -73,6 +80,28 @@ _rt_url = os.environ.get('MB_RT_URL', '').strip() or None
 _vehicles_json = None
 _last_update_ts = None
 app = Flask(__name__, static_folder=None)
+
+# Endpoints KYC (Didit): /api/didit/session, /webhook, /status. Requiere didit_backend.py + env vars.
+try:
+    from didit_backend import didit_bp
+    app.register_blueprint(didit_bp)
+except Exception as _e:
+    print(f'[didit] blueprint no cargado: {_e}', flush=True)
+
+# Voz TTS (AWS Polly, voz Mia): /api/tts. Requiere tts_backend.py + boto3 + credenciales AWS/Polly.
+try:
+    from tts_backend import tts_bp
+    app.register_blueprint(tts_bp)
+except Exception as _e:
+    print(f'[tts] blueprint no cargado: {_e}', flush=True)
+
+# Panel admin para mandar afectaciones A MANO: GET/POST /admin/afectacion (form web mobile).
+# Protegido por ADMIN_TOKEN; empuja por FCM al topic "afectaciones". Requiere admin_afect.py.
+try:
+    from admin_afect import admin_afect_bp
+    app.register_blueprint(admin_afect_bp)
+except Exception as _e:
+    print(f'[admin_afect] blueprint no cargado: {_e}', flush=True)
 
 
 def log(msg):
@@ -312,6 +341,45 @@ def vehicles():
         return send_from_directory(DATA_DIR, 'vehicles.json', mimetype='application/json')
     return Response(payload, mimetype='application/json',
                     headers={'Cache-Control': 'no-store'})
+
+
+@app.route('/data/afectaciones_mexibus.json')
+def afectaciones_mxb():
+    """Panel de afectaciones = feed + overrides manuales (los manuales ganan mientras no
+       venzan). Se calcula al vuelo; no se escribe archivo, así el feed no pisa lo manual."""
+    ahora = time.time()
+    por_linea = {}
+    # Feed Mexibús (mexibus_afectaciones) + estado Metrobús (push_metrobus). No colisionan
+    # (Mexibús 101+ vs Metrobús 1-7); cada uno ya trae su propia expiración/actualización.
+    for ruta in (FEED_AFECT, FEED_METRO):
+        try:
+            with open(ruta, encoding='utf-8') as f:
+                doc = json.load(f)
+            for a in doc.get('afectaciones', []):
+                por_linea[int(a.get('linea', 0))] = a
+        except Exception:
+            pass
+    try:
+        with open(MANUAL_AFECT, encoding='utf-8') as f:
+            manual = json.load(f)
+    except Exception:
+        manual = []
+    for m in manual:
+        try:
+            if float(m.get('expira', 0)) <= ahora:
+                continue   # aviso manual vencido (pasó su ventana o las 23:59)
+            ln = int(m.get('linea', 0))
+            a = {'linea': ln, 'estado': m.get('estado', ''),
+                 'lugar': m.get('lugar', ''), 'info': m.get('info', '')}
+            if m.get('circuito'):
+                a['circuito'] = m['circuito']
+            por_linea[ln] = a
+        except Exception:
+            pass
+    salida = {'actualizado': int(ahora),
+              'afectaciones': sorted(por_linea.values(), key=lambda x: x.get('linea', 0))}
+    return Response(json.dumps(salida, ensure_ascii=False),
+                    mimetype='application/json', headers={'Cache-Control': 'no-store'})
 
 
 @app.route('/data/modelos.csv')
