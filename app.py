@@ -343,22 +343,51 @@ def vehicles():
                     headers={'Cache-Control': 'no-store'})
 
 
+def _unicos(vals):
+    """Lista de valores no vacíos, únicos y en orden (para juntar textos sin repetir)."""
+    out = []
+    for v in vals:
+        v = (v or '').strip()
+        if v and v not in out:
+            out.append(v)
+    return out
+
+
 @app.route('/data/afectaciones_mexibus.json')
 def afectaciones_mxb():
     """Panel de afectaciones = feed + overrides manuales (los manuales ganan mientras no
-       venzan). Se calcula al vuelo; no se escribe archivo, así el feed no pisa lo manual."""
+       venzan). Se calcula al vuelo; no se escribe archivo, así el feed no pisa lo manual.
+       Si una línea trae varias afectaciones a la vez, se COMBINAN en una fila."""
     ahora = time.time()
-    por_linea = {}
     # Feed Mexibús (mexibus_afectaciones) + estado Metrobús (push_metrobus). No colisionan
     # (Mexibús 101+ vs Metrobús 1-7); cada uno ya trae su propia expiración/actualización.
+    porlinea = {}   # linea -> lista de afectaciones del feed
     for ruta in (FEED_AFECT, FEED_METRO):
         try:
             with open(ruta, encoding='utf-8') as f:
                 doc = json.load(f)
             for a in doc.get('afectaciones', []):
-                por_linea[int(a.get('linea', 0))] = a
+                porlinea.setdefault(int(a.get('linea', 0)), []).append(a)
         except Exception:
             pass
+    # combina varias afectaciones de la MISMA línea en una sola fila (junta estado/lugar/info)
+    combinado = {}
+    for ln, items in porlinea.items():
+        if len(items) == 1:
+            combinado[ln] = items[0]
+            continue
+        circ = []
+        for i in items:
+            if i.get('circuito'):
+                circ.extend(i['circuito'])
+        e = {'linea': ln,
+             'estado': ' / '.join(_unicos([i.get('estado', '') for i in items])),
+             'lugar': ' / '.join(_unicos([i.get('lugar', '') for i in items])),
+             'info': ' · '.join(_unicos([i.get('info', '') for i in items]))}
+        if circ:
+            e['circuito'] = circ
+        combinado[ln] = e
+    # overrides manuales: reemplazan la línea completa (ganan mientras no venzan)
     try:
         with open(MANUAL_AFECT, encoding='utf-8') as f:
             manual = json.load(f)
@@ -373,11 +402,11 @@ def afectaciones_mxb():
                  'lugar': m.get('lugar', ''), 'info': m.get('info', '')}
             if m.get('circuito'):
                 a['circuito'] = m['circuito']
-            por_linea[ln] = a
+            combinado[ln] = a
         except Exception:
             pass
     salida = {'actualizado': int(ahora),
-              'afectaciones': sorted(por_linea.values(), key=lambda x: x.get('linea', 0))}
+              'afectaciones': sorted(combinado.values(), key=lambda x: x.get('linea', 0))}
     return Response(json.dumps(salida, ensure_ascii=False),
                     mimetype='application/json', headers={'Cache-Control': 'no-store'})
 
