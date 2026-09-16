@@ -239,7 +239,14 @@ def fetch_posts_rss():
             desc = item.findtext("description") or ""
             desc = re.sub(r"(?i)<br\s*/?>", "\n", desc)          # <br> → salto de línea
             desc = re.sub(r"<[^>]+>", " ", desc)                 # quita el resto de HTML
-            desc = re.sub(r"—\s*Mexib[uú]s Informa.*", "", desc, flags=re.S)   # quita el pie "— Mexibús Informa …"
+            # Quita el pie de firma que RSS.app agrega a TODOS los embeds de X, no solo los de
+            # Mexibús Informa: "— <Nombre de la cuenta> (@handle) <fecha>". Antes solo se quitaba
+            # el de "Mexibús Informa" específicamente; al agregar cuentas por línea (@MexibusL2,
+            # @Mexibuslll, @MexiBus_4) su propio nombre ("Mexibus L2", etc.) se quedaba pegado al
+            # texto, y como ese nombre por sí mismo hace match con el patrón de línea (p. ej.
+            # "mexibus l2" cae en el patrón de "mexibus linea 2"), un tuit sin ningún texto real
+            # (solo un video) se interpretaba como afectación real de esa línea.
+            desc = re.sub(r"—\s*.+?\(@[\w.]+\).*$", "", desc, flags=re.S)
             texto = desc.strip() or titulo.strip()
             if not texto:
                 continue
