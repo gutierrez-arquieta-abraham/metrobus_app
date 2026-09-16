@@ -130,7 +130,10 @@ def estado_de(tn: str) -> str:
         return "Retraso en el servicio"
     if re.search(r"omite acople|pasa de largo|sin parada|no se detiene", tn):
         return "Paso de largo"     # estación suelta que no se atiende (la línea sigue)
-    if re.search(r"estacion(es)? cerrad|cerrad", tn):
+    # "no se tiene servicio en estación X" NO contiene "sin servicio" (es "no ... tiene", no "sin"),
+    # así que no caía en el check de arriba y se iba al genérico "Afectación en el servicio" aunque
+    # el texto sea bien específico: estaciones puntuales sin servicio (la línea sigue en el resto).
+    if re.search(r"estacion(es)? cerrad|cerrad|no (?:hay|se tiene) servicio en", tn):
         return "Estación cerrada"
     return "Afectación en el servicio"
 
@@ -140,12 +143,16 @@ def estado_de(tn: str) -> str:
 # reencarpetamiento, ...") el lugar salía cortado a la mitad de una palabra ("...93 po"). Ahora
 # la captura es perezosa y también se detiene en conectores comunes ("por", "debido a", etc.)
 # aunque la coma esté lejos, y se le quita el artículo inicial ("la Estación..." -> "Estación...").
+# El tope de repetición (antes 35) sigue siendo necesario para no correr sin límite si nunca aparece
+# un conector/puntuación, pero 35 es MUY corto para "estación X y estación Y" (dos nombres juntados
+# por "y", común en estos avisos): con el tope tan bajo, el lookahead nunca llegaba a cumplirse
+# dentro del límite y el regex fallaba entero, dejando 'lugar' vacío. Se sube a 70.
 _LUGAR_FIN = r"(?:[,.;\n]|\s+(?:por|debido|ya que|mientras|hasta|se\s)\b)"
 
 def lugar_de(texto: str) -> str:
-    for rx in [r"a la altura de ([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)",
-               r"zona de ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)",
-               r"estaci[oó]n(?:es)? ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,35}?)(?=" + _LUGAR_FIN + r"|$)"]:
+    for rx in [r"a la altura de ([A-Za-zÁÉÍÓÚÑáéíóúñ0-9][\wáéíóúñ.\- ]{2,70}?)(?=" + _LUGAR_FIN + r"|$)",
+               r"zona de ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,70}?)(?=" + _LUGAR_FIN + r"|$)",
+               r"estaci[oó]n(?:es)? ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,70}?)(?=" + _LUGAR_FIN + r"|$)"]:
         m = re.search(rx, texto)
         if m:
             return re.sub(r"^(el|la|los|las)\s+", "", m.group(1).strip(), flags=re.I)
