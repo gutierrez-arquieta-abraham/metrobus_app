@@ -63,6 +63,7 @@ FB_API_VER       = os.getenv("FB_API_VERSION", "v21.0")
 FCM_TOPIC        = os.getenv("FCM_TOPIC", "afectaciones")
 GOOGLE_CREDS     = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 ESTADO_PATH      = os.getenv("MXB_AFECT_STATE", "/tmp/mxb_afect_state.json")
+CONTENIDO_PATH   = os.getenv("MXB_CONTENIDO_STATE", "/tmp/mxb_contenido_state.json")   # dedup por línea+estado+lugar
 XCACHE_PATH      = os.getenv("MXB_XCACHE", "/tmp/mxb_x_cache.json")   # since_id + user_id de X
 POLL_SECONDS     = _int_env("MXB_AFECT_POLL", 60)
 MAX_POST_AGE_MIN = _int_env("MXB_AFECT_MAX_AGE", 90)
@@ -318,6 +319,18 @@ def _guardar_estado(claves):
 def _clave(a):  # misma clave de dedup que la app
     return f"{a['linea']}|{a['estado'].lower()}|{a['lugar'].lower()}"
 
+# ------------------------------------------- dedup por CONTENIDO (varias cuentas, mismo aviso)
+def _cargar_contenido():
+    try:
+        with open(CONTENIDO_PATH, encoding="utf-8") as f: return json.load(f)
+    except Exception: return {}
+
+def _guardar_contenido(mapa):
+    try:
+        with open(CONTENIDO_PATH, "w", encoding="utf-8") as f:
+            json.dump(mapa, f, ensure_ascii=False)
+    except Exception as e: print("[warn] no se pudo guardar estado de contenido:", e)
+
 # ------------------------------------------------------------------------------ envío FCM
 _fcm_ready = False
 def _init_fcm():
@@ -394,11 +407,13 @@ def escribir_estado(posts):
 # --------------------------------------------------------------------------- ciclo principal
 def procesar_una_vez():
     vistos = _cargar_estado(); enviados = 0
+    contenido = _cargar_contenido()
     try:
         posts = fetch_posts()
     except Exception as e:
         print("[error] fetch_posts:", e); return 0
     ahora = datetime.now(timezone.utc)
+    ahora_ts = ahora.timestamp()
     ids_actuales = {str(p.get("id")) for p in posts}
     for post in sorted(posts, key=lambda p: p["created_time"]):
         if (ahora - post["created_time"]).total_seconds() / 60 > MAX_POST_AGE_MIN:
@@ -408,12 +423,24 @@ def procesar_una_vez():
             k = str(post.get("id")) + "|" + a["linea"]
             if k in vistos:
                 continue
+            # Dedup POR CONTENIDO (línea+estado+lugar): con varias cuentas vigilando la misma línea
+            # (SITRAMYTEM/MexibusInforma + la cuenta específica de esa línea, p. ej. @MexibusL2), el
+            # MISMO aviso real llega como posts DISTINTOS (id distinto) desde cuentas distintas. Sin
+            # esto se mandaba un push duplicado por cada cuenta que republicara el mismo aviso. Vigente
+            # mientras el aviso lo esté (MXB_ESTADO_TTL), igual que el panel de la app.
+            ck = _clave(a)
+            ya_enviado = ck in contenido and (ahora_ts - contenido[ck]) / 60 <= MXB_ESTADO_TTL
+            vistos.add(k)   # no reevaluar este post de nuevo, se haya mandado o no
+            if ya_enviado:
+                continue
             enviar_fcm(a); enviados += 1
-            vistos.add(k)
+            contenido[ck] = ahora_ts
     # Poda: conserva solo claves de posts aún presentes en el feed (evita crecer sin límite; los
     # que salen del feed ya no se reprocesan, así que no se reenviarán aunque se olviden).
     vistos = {k for k in vistos if k.split("|", 1)[0] in ids_actuales}
+    contenido = {k: ts for k, ts in contenido.items() if (ahora_ts - ts) / 60 <= MXB_ESTADO_TTL}
     _guardar_estado(vistos)
+    _guardar_contenido(contenido)
     escribir_estado(posts)   # actualiza el estado actual para el panel de la app
     return enviados
 
