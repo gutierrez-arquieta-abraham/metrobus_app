@@ -53,7 +53,7 @@ MANUAL_FILE = os.environ.get("AFECT_MANUAL_FILE", "").split("#", 1)[0].strip() \
 DUR_H = float(os.environ.get("AFECT_DUR_H", "7").split("#", 1)[0].strip() or "7")
 
 # Catálogo de líneas (códigos que entiende la app). Metrobús 1-7, Mexibús 101-104,
-# ramales 111-113. (Mexicable no se maneja desde el aviso web.)
+# ramales 111-113, Mexicable 201-202.
 LINEAS = [
     ("1", "Metrobús L1"), ("2", "Metrobús L2"), ("3", "Metrobús L3"),
     ("4", "Metrobús L4"), ("5", "Metrobús L5"), ("6", "Metrobús L6"),
@@ -62,6 +62,7 @@ LINEAS = [
     ("104", "Mexibús L4"),
     ("111", "Mexibús L1A (AIFA)"), ("112", "Mexibús L2A (Serv. Eléctrico)"),
     ("113", "Mexibús L3A"),
+    ("201", "Mexicable L1"), ("202", "Mexicable L2"),
 ]
 
 ESTADOS = [

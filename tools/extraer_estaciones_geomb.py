@@ -9,9 +9,9 @@ Uso:
 
 Si no se pasa ruta, usa la variable de entorno GEOMB_REPO o, en su defecto,
 "../GeoMB" relativo a este repo. Lee lineas.json (Metrobús 1-7) y mexibus.json
-(Mexibús 101-104 ordinario y 111-113 ramales) — las mismas líneas que
-LINEAS en admin_afect.py; no incluye exprés (12X) ni Mexicable (20X), que el
-panel web no maneja.
+(Mexibús 101-104 ordinario, 111-113 ramales y Mexicable 201-202) — las mismas
+líneas que LINEAS en admin_afect.py; no incluye exprés (12X): no es una línea
+física distinta, sino un servicio más rápido sobre la misma vía.
 
 Volver a correr este script cuando esos assets cambien en GeoMB (estación
 nueva, renombre, etc.) para mantener el selector del panel alineado.
@@ -22,7 +22,7 @@ import re
 import sys
 
 LINEAS_METROBUS = range(1, 8)
-LINEAS_MEXIBUS = (101, 102, 103, 104, 111, 112, 113)
+LINEAS_MEXIBUS = (101, 102, 103, 104, 111, 112, 113, 201, 202)
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
