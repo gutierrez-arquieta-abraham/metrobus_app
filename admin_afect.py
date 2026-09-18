@@ -66,9 +66,19 @@ LINEAS = [
 
 ESTADOS = [
     "Sin servicio", "Servicio parcial", "Retraso en el servicio",
+    "Obstrucción de carril", "Manifestación",
     "Paso de largo", "Estación cerrada", "Estación en mantenimiento",
     "Afectación en el servicio", "Servicio restablecido",
 ]
+
+# Catálogo de estaciones por línea (extraído de GeoMB: lineas.json + mexibus.json), para
+# poblar el <select> de "Estaciones afectadas"/"Circuito" según la línea elegida — evita
+# tener que teclear el nombre exacto de la estación a mano.
+try:
+    with open(os.path.join(APP_DIR, "data", "estaciones_por_linea.json"), encoding="utf-8") as _f:
+        ESTACIONES_POR_LINEA = json.load(_f)
+except Exception:
+    ESTACIONES_POR_LINEA = {}
 
 
 def _token_ok():
@@ -187,6 +197,7 @@ def enviar():
 # ------------------------------------------------------------------ HTML (una sola página)
 _OP_LINEAS = "".join(f'<option value="{v}">{t}</option>' for v, t in LINEAS)
 _OP_ESTADOS = "".join(f'<option value="{e}">{e}</option>' for e in ESTADOS)
+_JS_ESTACIONES = json.dumps(ESTACIONES_POR_LINEA, ensure_ascii=False)
 
 _HTML = """<!doctype html><html lang="es"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -211,22 +222,24 @@ _HTML = """<!doctype html><html lang="es"><head>
        background:#1c1c1c;color:#ddd;font-size:13px;font-weight:500;white-space:nowrap}
  .chip.ok{background:#123d1a;color:#9be7a6;border-color:#1f5c2a}
  .chip:active{opacity:.8}
- .multi-row{display:flex;gap:8px;margin-top:6px;align-items:center}
+ .multi-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:center}
  .multi-row input{margin:0}
  .multi-row .x{flex:0 0 auto;width:36px;height:36px;padding:0;margin:0;border-radius:8px;
                background:#2a1414;color:#e79b9b;font-size:16px;font-weight:700}
  .link-btn{width:auto;margin-top:8px;padding:8px 4px;background:none;color:#7fb2e5;
            font-size:13px;font-weight:600;text-align:left}
  .link-btn:active{opacity:.7}
+ .multi-row select{margin:0}
+ .multi-row .otra{flex:1 0 100%;display:none}
 </style></head><body>
 <h1>Enviar afectación</h1>
 
 <div class="hint">Plantillas rápidas (llenan estado + detalle; edítalos si hace falta):</div>
 <div class="chips" id="plantillas">
- <button type="button" class="chip" data-estado="Sin servicio" data-info="Manifestación bloquea la circulación">🚩 Manifestación</button>
- <button type="button" class="chip" data-estado="Retraso en el servicio" data-info="Choque/incidente vial afecta la circulación">🚗 Choque vial</button>
+ <button type="button" class="chip" data-estado="Manifestación" data-info="Manifestación bloquea la circulación">🚩 Manifestación</button>
+ <button type="button" class="chip" data-estado="Obstrucción de carril" data-info="Choque/incidente vial afecta la circulación">🚗 Choque vial</button>
  <button type="button" class="chip" data-estado="Sin servicio" data-info="Corte de energía eléctrica en la estación">⚡ Corte de luz</button>
- <button type="button" class="chip" data-estado="Retraso en el servicio" data-info="Encharcamiento/inundación a la altura de la estación">🌧 Inundación</button>
+ <button type="button" class="chip" data-estado="Servicio parcial" data-info="Encharcamiento/inundación a la altura de la estación">🌧 Inundación</button>
  <button type="button" class="chip" data-estado="Estación en mantenimiento" data-info="Mantenimiento correctivo">🔧 Mantenimiento</button>
  <button type="button" class="chip ok" data-estado="Servicio restablecido" data-info="">✅ Restablecido</button>
 </div>
@@ -242,9 +255,12 @@ _HTML = """<!doctype html><html lang="es"><head>
  </div>
 
  <label>Estaciones afectadas (opcional)</label>
- <div id="lugares"><div class="multi-row"><input class="lugar-item" placeholder="Estación 1"></div></div>
+ <div id="lugares"><div class="multi-row">
+   <select class="lugar-item"></select>
+   <input class="otra lugar-otra" placeholder="Nombre de la estación">
+ </div></div>
  <button type="button" class="link-btn" id="btnLugar">+ agregar otra estación</button>
- <div class="hint">Varias estaciones se juntan solas con "y" al enviar.</div>
+ <div class="hint">Elige la línea primero para ver su lista. Varias estaciones se juntan solas con "y" al enviar.</div>
 
  <label>Detalle (info)</label>
  <textarea name="info" placeholder="debido a inundación a la altura de ..., se presenta retraso en el servicio"></textarea>
@@ -255,7 +271,11 @@ _HTML = """<!doctype html><html lang="es"><head>
 
  <details><summary>Circuito (tramos que SÍ operan) — opcional</summary>
   <div class="hint">Un tramo por fila: estación de un extremo y del otro.</div>
-  <div id="tramos"><div class="multi-row"><input class="tramo-a" placeholder="Desde"><input class="tramo-b" placeholder="Hasta"></div></div>
+  <div id="tramos"><div class="multi-row">
+    <select class="tramo-a"></select><select class="tramo-b"></select>
+    <input class="otra tramo-a-otra" placeholder="Desde (nombre)">
+    <input class="otra tramo-b-otra" placeholder="Hasta (nombre)">
+  </div></div>
   <button type="button" class="link-btn" id="btnTramo">+ agregar tramo</button>
   <textarea name="circuito" id="circuitoRaw" style="display:none"></textarea>
  </details>
@@ -264,6 +284,53 @@ _HTML = """<!doctype html><html lang="es"><head>
 </form>
 <div id="msg"></div>
 <script>
+ var ESTACIONES_POR_LINEA = __ESTACIONES__;
+ var selLinea = document.querySelector('select[name=linea]');
+
+ function poblarSelect(sel, valorPrevio){
+  var lista = ESTACIONES_POR_LINEA[selLinea.value] || [];
+  sel.innerHTML = '<option value="">-- Estación --</option>' +
+   lista.map(function(n){return '<option value="'+n.replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'">'+n+'</option>'}).join('') +
+   '<option value="__otra__">Otra (escribir)…</option>';
+  if (valorPrevio === '__otra__') sel.value = '__otra__';
+  else if (valorPrevio && lista.indexOf(valorPrevio) >= 0) sel.value = valorPrevio;
+ }
+
+ function ligarSelectOtra(sel, otra){
+  poblarSelect(sel);
+  sel.addEventListener('change', function(){
+   var esOtra = sel.value === '__otra__';
+   otra.style.display = esOtra ? 'block' : 'none';
+   if (esOtra) otra.focus();
+  });
+ }
+
+ function repoblarTodos(){
+  [].slice.call(document.querySelectorAll('#lugares .lugar-item')).forEach(function(sel){
+   poblarSelect(sel, sel.value);
+  });
+  [].slice.call(document.querySelectorAll('#tramos .tramo-a, #tramos .tramo-b')).forEach(function(sel){
+   poblarSelect(sel, sel.value);
+  });
+ }
+ selLinea.addEventListener('change', repoblarTodos);
+
+ [].slice.call(document.querySelectorAll('#lugares .lugar-item')).forEach(function(sel){
+  ligarSelectOtra(sel, sel.parentNode.querySelector('.lugar-otra'));
+ });
+ (function(){
+  var row = document.querySelector('#tramos .multi-row');
+  ligarSelectOtra(row.querySelector('.tramo-a'), row.querySelector('.tramo-a-otra'));
+  ligarSelectOtra(row.querySelector('.tramo-b'), row.querySelector('.tramo-b-otra'));
+ })();
+
+ function valorFila(sel){
+  var otra = sel.parentNode.querySelector(sel.classList.contains('tramo-a') ? '.tramo-a-otra'
+    : sel.classList.contains('tramo-b') ? '.tramo-b-otra' : '.lugar-otra');
+  if (sel.value === '__otra__') return otra ? otra.value.trim() : '';
+  return sel.value;
+ }
+
  var tk=document.getElementById('token');
  tk.value=localStorage.getItem('geomb_admin_token')||'';
  tk.addEventListener('change',function(){localStorage.setItem('geomb_admin_token',tk.value)});
@@ -276,32 +343,37 @@ _HTML = """<!doctype html><html lang="es"><head>
  });
 
  document.getElementById('btnLugar').addEventListener('click',function(){
-  var d=document.getElementById('lugares'), n=d.children.length+1;
+  var d=document.getElementById('lugares');
   var row=document.createElement('div'); row.className='multi-row';
-  var i=document.createElement('input'); i.className='lugar-item'; i.placeholder='Estación '+n;
+  var sel=document.createElement('select'); sel.className='lugar-item';
+  var otra=document.createElement('input'); otra.className='otra lugar-otra'; otra.placeholder='Nombre de la estación';
   var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='×';
   x.addEventListener('click',function(){row.remove()});
-  row.appendChild(i); row.appendChild(x); d.appendChild(row);
+  row.appendChild(sel); row.appendChild(otra); row.appendChild(x); d.appendChild(row);
+  ligarSelectOtra(sel, otra);
  });
  document.getElementById('btnTramo').addEventListener('click',function(){
   var d=document.getElementById('tramos');
   var row=document.createElement('div'); row.className='multi-row';
-  var a=document.createElement('input'); a.className='tramo-a'; a.placeholder='Desde';
-  var b=document.createElement('input'); b.className='tramo-b'; b.placeholder='Hasta';
+  var a=document.createElement('select'); a.className='tramo-a';
+  var b=document.createElement('select'); b.className='tramo-b';
+  var oa=document.createElement('input'); oa.className='otra tramo-a-otra'; oa.placeholder='Desde (nombre)';
+  var ob=document.createElement('input'); ob.className='otra tramo-b-otra'; ob.placeholder='Hasta (nombre)';
   var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='×';
   x.addEventListener('click',function(){row.remove()});
-  row.appendChild(a); row.appendChild(b); row.appendChild(x); d.appendChild(row);
+  row.appendChild(a); row.appendChild(oa); row.appendChild(b); row.appendChild(ob); row.appendChild(x); d.appendChild(row);
+  ligarSelectOtra(a, oa); ligarSelectOtra(b, ob);
  });
 
  document.getElementById('f').addEventListener('submit',function(ev){
   ev.preventDefault();
   localStorage.setItem('geomb_admin_token',tk.value);
 
-  var lugares=[].slice.call(document.querySelectorAll('.lugar-item'))
-   .map(function(i){return i.value.trim()}).filter(Boolean);
+  var lugares=[].slice.call(document.querySelectorAll('#lugares .lugar-item'))
+   .map(function(sel){return valorFila(sel).trim()}).filter(Boolean);
   var tramos=[].slice.call(document.querySelectorAll('#tramos .multi-row'))
    .map(function(row){
-    var a=row.querySelector('.tramo-a').value.trim(), b=row.querySelector('.tramo-b').value.trim();
+    var a=valorFila(row.querySelector('.tramo-a')).trim(), b=valorFila(row.querySelector('.tramo-b')).trim();
     return (a&&b) ? (a+' - '+b) : null;
    }).filter(Boolean);
   document.getElementById('circuitoRaw').value=tramos.join('\\n');
@@ -319,4 +391,5 @@ _HTML = """<!doctype html><html lang="es"><head>
    .catch(function(e){m.style.display='block';m.className='err';m.textContent='⚠ '+e;});
  });
 </script>
-</body></html>""".replace("__LINEAS__", _OP_LINEAS).replace("__ESTADOS__", _OP_ESTADOS)
+</body></html>""".replace("__LINEAS__", _OP_LINEAS).replace("__ESTADOS__", _OP_ESTADOS) \
+    .replace("__ESTACIONES__", _JS_ESTACIONES)
