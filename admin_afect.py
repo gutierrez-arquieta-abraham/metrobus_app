@@ -117,9 +117,10 @@ def _fin_del_dia_local(ts):
     return d.timestamp()
 
 
-def _guardar_override(linea, estado, lugar, info, circuito):
+def _guardar_override(linea, estado, lugar, info, circuito, duracion_h=None):
     """Escribe/actualiza el override manual (con 'expira'). 'Servicio restablecido' quita
-       la línea. app.py lo mezcla con el feed al servir el panel. Best-effort, atómico."""
+       la línea. app.py lo mezcla con el feed al servir el panel. Best-effort, atómico.
+       duracion_h: horas que dura ESTE aviso en particular; si no se manda, usa DUR_H (env)."""
     try:
         try:
             with open(MANUAL_FILE, encoding="utf-8") as f:
@@ -132,7 +133,8 @@ def _guardar_override(linea, estado, lugar, info, circuito):
                   if float(m.get("expira", 0)) > ahora
                   and int(m.get("linea", 0)) != int(linea)]
         if "restablec" not in estado.lower():
-            expira = min(ahora + DUR_H * 3600, _fin_del_dia_local(ahora))
+            horas = duracion_h if duracion_h and duracion_h > 0 else DUR_H
+            expira = min(ahora + horas * 3600, _fin_del_dia_local(ahora))
             e = {"linea": int(linea), "estado": estado, "lugar": lugar,
                  "info": info, "expira": int(expira)}
             if circuito:
@@ -163,15 +165,23 @@ def enviar():
     lugar = (request.form.get("lugar") or "").strip()
     info = (request.form.get("info") or "").strip()
     circuito = _segmentos_circuito(request.form.get("circuito", ""))
+    duracion_h = None
+    try:
+        crudo = (request.form.get("duracion_h") or "").strip()
+        if crudo:
+            duracion_h = max(0.5, min(48.0, float(crudo)))   # tope razonable: 30 min a 48 h
+    except ValueError:
+        pass
     if not linea or not estado:
         return {"ok": False, "error": "faltan línea o estado"}, 400
     try:
         _empujar_fcm(linea, estado, lugar, info)
     except Exception as e:
         return {"ok": False, "error": f"FCM: {e}"}, 500
-    panel = _guardar_override(linea, estado, lugar, info, circuito)
+    panel = _guardar_override(linea, estado, lugar, info, circuito, duracion_h)
     return {"ok": True, "linea": linea, "estado": estado,
-            "panel": panel, "circuito": circuito}
+            "panel": panel, "circuito": circuito,
+            "duracion_h": duracion_h or DUR_H}
 
 
 # ------------------------------------------------------------------ HTML (una sola página)
@@ -196,8 +206,31 @@ _HTML = """<!doctype html><html lang="es"><head>
  .ok{background:#123d1a;color:#9be7a6}.err{background:#3d1212;color:#e79b9b}
  .hint{font-size:12px;color:#888;margin-top:2px}
  details{margin-top:10px}summary{color:#bbb;font-size:14px}
+ .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+ .chip{flex:0 0 auto;width:auto;margin:0;padding:9px 14px;border-radius:20px;border:1px solid #444;
+       background:#1c1c1c;color:#ddd;font-size:13px;font-weight:500;white-space:nowrap}
+ .chip.ok{background:#123d1a;color:#9be7a6;border-color:#1f5c2a}
+ .chip:active{opacity:.8}
+ .multi-row{display:flex;gap:8px;margin-top:6px;align-items:center}
+ .multi-row input{margin:0}
+ .multi-row .x{flex:0 0 auto;width:36px;height:36px;padding:0;margin:0;border-radius:8px;
+               background:#2a1414;color:#e79b9b;font-size:16px;font-weight:700}
+ .link-btn{width:auto;margin-top:8px;padding:8px 4px;background:none;color:#7fb2e5;
+           font-size:13px;font-weight:600;text-align:left}
+ .link-btn:active{opacity:.7}
 </style></head><body>
 <h1>Enviar afectación</h1>
+
+<div class="hint">Plantillas rápidas (llenan estado + detalle; edítalos si hace falta):</div>
+<div class="chips" id="plantillas">
+ <button type="button" class="chip" data-estado="Sin servicio" data-info="Manifestación bloquea la circulación">🚩 Manifestación</button>
+ <button type="button" class="chip" data-estado="Retraso en el servicio" data-info="Choque/incidente vial afecta la circulación">🚗 Choque vial</button>
+ <button type="button" class="chip" data-estado="Sin servicio" data-info="Corte de energía eléctrica en la estación">⚡ Corte de luz</button>
+ <button type="button" class="chip" data-estado="Retraso en el servicio" data-info="Encharcamiento/inundación a la altura de la estación">🌧 Inundación</button>
+ <button type="button" class="chip" data-estado="Estación en mantenimiento" data-info="Mantenimiento correctivo">🔧 Mantenimiento</button>
+ <button type="button" class="chip ok" data-estado="Servicio restablecido" data-info="">✅ Restablecido</button>
+</div>
+
 <form id="f">
  <label>Token de admin (opcional)</label>
  <input id="token" name="token" type="password" autocomplete="off" placeholder="solo si no usas certificado">
@@ -208,16 +241,23 @@ _HTML = """<!doctype html><html lang="es"><head>
   <div><label>Estado</label><select name="estado">__ESTADOS__</select></div>
  </div>
 
- <label>Lugar / estación (opcional)</label>
- <input name="lugar" placeholder="p. ej. ODAPAS y Santa Elena">
+ <label>Estaciones afectadas (opcional)</label>
+ <div id="lugares"><div class="multi-row"><input class="lugar-item" placeholder="Estación 1"></div></div>
+ <button type="button" class="link-btn" id="btnLugar">+ agregar otra estación</button>
+ <div class="hint">Varias estaciones se juntan solas con "y" al enviar.</div>
 
  <label>Detalle (info)</label>
  <textarea name="info" placeholder="debido a inundación a la altura de ..., se presenta retraso en el servicio"></textarea>
 
+ <label>Duración del aviso</label>
+ <input name="duracion_h" type="number" min="0.5" max="48" step="0.5" placeholder="por defecto 7 h (o hasta las 23:59, lo que sea antes)">
+ <div class="hint">Cuánto dura activo si no lo actualizas antes. Entre 0.5 y 48 h.</div>
+
  <details><summary>Circuito (tramos que SÍ operan) — opcional</summary>
-  <label>Un tramo por línea, formato "A - B"</label>
-  <textarea name="circuito" placeholder="Chimalhuacán - Sor Juana Inés
-Pantitlán - López Mateos"></textarea>
+  <div class="hint">Un tramo por fila: estación de un extremo y del otro.</div>
+  <div id="tramos"><div class="multi-row"><input class="tramo-a" placeholder="Desde"><input class="tramo-b" placeholder="Hasta"></div></div>
+  <button type="button" class="link-btn" id="btnTramo">+ agregar tramo</button>
+  <textarea name="circuito" id="circuitoRaw" style="display:none"></textarea>
  </details>
 
  <button type="submit">Difundir aviso</button>
@@ -227,15 +267,53 @@ Pantitlán - López Mateos"></textarea>
  var tk=document.getElementById('token');
  tk.value=localStorage.getItem('geomb_admin_token')||'';
  tk.addEventListener('change',function(){localStorage.setItem('geomb_admin_token',tk.value)});
+
+ document.querySelectorAll('#plantillas .chip').forEach(function(b){
+  b.addEventListener('click',function(){
+   document.querySelector('select[name=estado]').value=b.dataset.estado;
+   document.querySelector('textarea[name=info]').value=b.dataset.info;
+  });
+ });
+
+ document.getElementById('btnLugar').addEventListener('click',function(){
+  var d=document.getElementById('lugares'), n=d.children.length+1;
+  var row=document.createElement('div'); row.className='multi-row';
+  var i=document.createElement('input'); i.className='lugar-item'; i.placeholder='Estación '+n;
+  var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='×';
+  x.addEventListener('click',function(){row.remove()});
+  row.appendChild(i); row.appendChild(x); d.appendChild(row);
+ });
+ document.getElementById('btnTramo').addEventListener('click',function(){
+  var d=document.getElementById('tramos');
+  var row=document.createElement('div'); row.className='multi-row';
+  var a=document.createElement('input'); a.className='tramo-a'; a.placeholder='Desde';
+  var b=document.createElement('input'); b.className='tramo-b'; b.placeholder='Hasta';
+  var x=document.createElement('button'); x.type='button'; x.className='x'; x.textContent='×';
+  x.addEventListener('click',function(){row.remove()});
+  row.appendChild(a); row.appendChild(b); row.appendChild(x); d.appendChild(row);
+ });
+
  document.getElementById('f').addEventListener('submit',function(ev){
   ev.preventDefault();
   localStorage.setItem('geomb_admin_token',tk.value);
+
+  var lugares=[].slice.call(document.querySelectorAll('.lugar-item'))
+   .map(function(i){return i.value.trim()}).filter(Boolean);
+  var tramos=[].slice.call(document.querySelectorAll('#tramos .multi-row'))
+   .map(function(row){
+    var a=row.querySelector('.tramo-a').value.trim(), b=row.querySelector('.tramo-b').value.trim();
+    return (a&&b) ? (a+' - '+b) : null;
+   }).filter(Boolean);
+  document.getElementById('circuitoRaw').value=tramos.join('\\n');
+
   var m=document.getElementById('msg');m.style.display='none';
-  fetch('/admin/afectacion',{method:'POST',body:new FormData(ev.target)})
+  var fd=new FormData(ev.target);
+  fd.set('lugar', lugares.join(' y '));
+  fetch('/admin/afectacion',{method:'POST',body:fd})
    .then(function(r){return r.json().then(function(j){return {s:r.status,j:j}})})
    .then(function(x){
      m.style.display='block';
-     if(x.j.ok){m.className='ok';m.textContent='✅ Enviado: '+x.j.estado+' (línea '+x.j.linea+')'+(x.j.panel?' · panel actualizado':' · panel no escrito');}
+     if(x.j.ok){m.className='ok';m.textContent='✅ Enviado: '+x.j.estado+' (línea '+x.j.linea+')'+(x.j.panel?' · panel actualizado':' · panel no escrito')+' · dura '+x.j.duracion_h+' h';}
      else{m.className='err';m.textContent='⚠ '+(x.j.error||('error '+x.s));}
    })
    .catch(function(e){m.style.display='block';m.className='err';m.textContent='⚠ '+e;});
