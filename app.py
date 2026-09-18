@@ -1,3 +1,22 @@
+# ============================================================
+# MÓDULO   : app.py   (servidor web Flask)
+# PROYECTO : GeoMB — Backend (EC2)
+# ============================================================
+#
+# DESCRIPCIÓN:
+#
+# Es el PROGRAMA PRINCIPAL del servidor (servicio metrobus-web). Con Flask:
+#   - sirve la web (index.html) y los datos en /data/*;
+#   - expone /data/vehicles.json con las posiciones EN VIVO de las unidades
+#     (las baja de la API oficial de Sonda cada pocos segundos);
+#   - arma /data/afectaciones_mexibus.json MEZCLANDO al vuelo el feed Mexibús,
+#     el estado Metrobús y los avisos manuales (FEED_AFECT/FEED_METRO/MANUAL_AFECT);
+#   - registra los "blueprints" (piezas): didit_backend (KYC), tts_backend
+#     (voz Polly) y admin_afect (panel de afectaciones a mano).
+#
+# Corre con gunicorn (app:app) detrás de nginx. La docstring de abajo detalla
+# las variables de entorno.
+# ============================================================
 """
 Metrobús CDMX — mapa en tiempo real (proceso único, listo para desplegar)
 ==========================================================================

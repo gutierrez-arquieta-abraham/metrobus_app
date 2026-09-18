@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+# ============================================================
+# MÓDULO   : admin_afect.py   (Blueprint de Flask)
+# PROYECTO : GeoMB — Backend (EC2)
+# ============================================================
+#
+# DESCRIPCIÓN:
+#
+# Panel WEB para mandar avisos de afectación A MANO (más rápido que el
+# scraper). Formulario móvil en /admin/afectacion: eliges línea, estado,
+# lugar, info y tramos de circuito.
+#
+# Al enviar: empuja por FCM (topic "afectaciones", reusa push_metrobus._push)
+# y escribe un OVERRIDE en afect_manual.json con caducidad (expira). Protegido
+# con certificado cliente (mTLS) que valida nginx; token solo de respaldo.
+# ============================================================
 """
 admin_afect.py — Panel web para mandar avisos de afectación A MANO (GeoMB / EC2)
 --------------------------------------------------------------------------------

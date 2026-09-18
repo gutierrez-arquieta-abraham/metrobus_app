@@ -1,4 +1,19 @@
 # -*- coding: utf-8 -*-
+# ============================================================
+# MÓDULO   : mexibus_afectaciones.py   (servicio mexibus-afectaciones)
+# PROYECTO : GeoMB — Backend (EC2)
+# ============================================================
+#
+# DESCRIPCIÓN:
+#
+# Sondea los feeds RSS de "Mexibús Informa" (SITRAMYTEM), INTERPRETA cada
+# publicación (qué línea, estado, lugar, circuito) y:
+#   - la empuja por FCM (topic "afectaciones") en el formato que consume la app;
+#   - escribe el estado actual del panel (afectaciones_mexibus.json).
+#
+# Regla clave: un post con "#ampliación" + línea 3 ⇒ L3A (113). Caduca los
+# avisos por TTL y con tope a las 23:59 CDMX. Corre en bucle (poll cada 60 s).
+# ============================================================
 """
 mexibus_afectaciones.py  —  backend GeoMB (FastAPI / EC2)
 ---------------------------------------------------------
@@ -82,6 +97,15 @@ def _norm(s: str) -> str:
 # Tolerante a "línea" mal escrita (linia/lnea/line) y a formas cortas ("L1", "MexibúsL1",
 # "mexibus l1"), SIN falsos positivos (exige 'mexibus'+L pegado, o un límite de palabra antes
 # del L/linea). Orden: ramales/alias ANTES que troncales para que "1a" no caiga en "1".
+# ------------------------------------------------------------
+# PARTE "REBUSCADA": detectar la LÍNEA con expresiones regulares
+# ------------------------------------------------------------
+# Los posts escriben la línea de mil formas: "Línea 4", "L4", "MexibúsLínea4",
+# "linea4", con o sin acento, pegado o separado. _pat(n) arma una regex que
+# atrapa todas esas variantes para el número n. Los "límites de palabra" (\b)
+# evitan FALSOS POSITIVOS: p. ej. "...a la altura de la calle 1 a..." NO debe
+# leerse como el ramal "1a"; por eso el ramal exige la "a" PEGADA (1a) y los
+# troncales un límite de palabra alrededor del número.
 _LW = r"(?:linea|linia|lnea|line|l)"   # "línea" y variantes + "L"
 def _pat(n, ramal=False):
     suf = r"a\b" if ramal else r"\b"   # ramal: "1a" pegado (no "1 a", que es "…1 a la altura…")
@@ -155,7 +179,7 @@ def lugar_de(texto: str) -> str:
                r"estaci[oó]n(?:es)? ([A-ZÁÉÍÓÚÑ][\wáéíóúñ.\- ]{2,70}?)(?=" + _LUGAR_FIN + r"|$)"]:
         m = re.search(rx, texto)
         if m:
-            return re.sub(r"^(el|la|los|las)\s+", "", m.group(1).strip(), flags=re.I)
+            return re.split(r"[,.;\n]", m.group(1))[0].strip()
     return ""
 
 # ------------------------------------------------------------------- info (detalle limpio)
@@ -209,14 +233,6 @@ def fetch_posts():
     return fetch_posts_rss()       # por defecto: RSS
 
 # --- RSS (RSS.app u otro puente de la cuenta de X/FB) -------------------------------------
-# Si un feed falla (p. ej. RSS.app devolviendo 402 "Payment Required" porque la cuenta se quedó
-# sin plan/cupo), reintentar cada POLL_SECONDS lo único que logra es llenar el log de warnings
-# idénticos y gastar peticiones contra un servicio que ya sabemos que va a fallar. Cada URL entra
-# en un "cooldown" que crece (backoff exponencial, tope RSS_BACKOFF_MAX_S) mientras siga fallando,
-# y se resetea en cuanto vuelve a responder bien.
-RSS_BACKOFF_MAX_S = 1800   # tope de espera entre reintentos por feed (30 min)
-_rss_estado = {}           # url -> {"proximo": epoch del próximo intento permitido, "fallos": int}
-
 def fetch_posts_rss():
     """Lee uno o VARIOS feeds RSS (RSS_URL separados por coma) y usa el título como texto."""
     import requests, xml.etree.ElementTree as ET
@@ -225,21 +241,12 @@ def fetch_posts_rss():
     if not urls:
         raise RuntimeError("Falta RSS_URL")
     out = []
-    ahora = time.time()
     for url in urls:
-        st = _rss_estado.get(url, {"proximo": 0, "fallos": 0})
-        if ahora < st["proximo"]:
-            continue   # en cooldown tras fallos repetidos: no insiste este ciclo
         try:
             r = requests.get(url, timeout=20); r.raise_for_status()
             root = ET.fromstring(r.content)
-            _rss_estado[url] = {"proximo": 0, "fallos": 0}   # se recuperó
         except Exception as e:
-            fallos = st["fallos"] + 1
-            espera = min(RSS_BACKOFF_MAX_S, POLL_SECONDS * (2 ** min(fallos, 6)))
-            _rss_estado[url] = {"proximo": ahora + espera, "fallos": fallos}
-            print(f"[warn] RSS {url}: {e} (reintenta en {int(espera)}s)")
-            continue
+            print(f"[warn] RSS {url}: {e}"); continue
         for item in root.iter("item"):
             titulo = item.findtext("title") or ""
             # La DESCRIPCIÓN conserva los saltos de línea (<br>) → tramos del circuito en líneas aparte.

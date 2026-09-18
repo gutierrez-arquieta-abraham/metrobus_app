@@ -1,3 +1,19 @@
+# ============================================================
+# MÓDULO   : push_metrobus.py   (servicio metrobus-push)
+# PROYECTO : GeoMB — Backend (EC2)
+# ============================================================
+#
+# DESCRIPCIÓN:
+#
+# Vigila el estado del servicio Metrobús y MANDA notificaciones push (FCM):
+#   - Estado del servicio (afectaciones) → topic "afectaciones";
+#   - Elevadores fuera de servicio → topic "elevadores";
+#   - Mantenimiento de estaciones (vigente hoy) → topic "afectaciones".
+#
+# Además ESCRIBE el estado raspado a afect_metrobus.json para que el panel de
+# la app persista (no dependa de cachar el push). Lee las páginas del gobierno
+# con requests + BeautifulSoup (sin navegador). Corre como servicio aparte.
+# ============================================================
 """
 push_metrobus.py — Notificaciones push (FCM) desde el backend (Railway/Flask) para GeoMB.
 
