@@ -6,16 +6,16 @@ de GeoMB (segmentos.json) como fuente confiable.
 Por qué: index.html dibuja cada ruta['shape'] como una sola L.polyline — Leaflet une
 puntos consecutivos con una línea recta sin importar qué tan lejos estén, así que un
 salto grande entre dos puntos se ve como un "corte" atravesando manzanas en diagonal en
-vez de seguir la calle real (reportado por el usuario cerca de La Raza L3 y Buenavista
-L1/L3). La causa es que el shape original (derivado del GTFS oficial) trae puntos muy
-espaciados en esos tramos.
+vez de seguir la calle real (reportado por el usuario cerca de La Raza L3, Buenavista
+L1/L3/L4 y Etiopía L2/L3). La causa es que el shape original (derivado del GTFS oficial)
+trae puntos muy espaciados en esos tramos.
 
-Cómo lo arregla: por cada salto > `UMBRAL` metros en una ruta de Metrobús (líneas 1, 3,
-4 por ahora), busca en los `segmentos` de esa línea en GeoMB el tramo que pase cerca
+Cómo lo arregla: por cada salto > `UMBRAL` metros en una ruta de Metrobús (líneas 1, 2,
+3, 4 por ahora), busca en los `segmentos` de esa línea en GeoMB el tramo que pase cerca
 (<150m) de AMBOS extremos del salto, prefiriendo el que aporte más camino real entre
 ellos (para no quedarse con un tramo degenerado que solo roza los mismos dos puntos), y
-lo inserta en medio. Los saltos que ningún tramo de GeoMB cubre (fuera del rango de La
-Raza/Buenavista, en su mayoría) se dejan igual — no hay de dónde tomar el relleno.
+lo inserta en medio. Los saltos que ningún tramo de GeoMB cubre se dejan igual — no hay
+de dónde tomar el relleno.
 
 Uso:
     python3 tools/rellenar_saltos_rutas.py [ruta_al_checkout_de_GeoMB]
@@ -31,7 +31,7 @@ import sys
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ROUTES_PATH = os.path.join(APP_DIR, "data", "routes.json")
-LINEAS_A_REVISAR = {1, 3, 4}
+LINEAS_A_REVISAR = {1, 2, 3, 4}
 UMBRAL_SALTO_M = 250
 RADIO_MATCH_M = 150
 
