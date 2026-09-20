@@ -135,6 +135,10 @@ def lineas_en_texto(tn: str):
     # "Servicio Eléctrico" = L2A: su "#MexibusLinea2" es solo el corredor troncal → deja L2A, quita L2.
     if re.search(r"servicio\s*electric|servicioelectric", tn) and 112 in enc:
         enc.pop(102, None)
+    # AIFA/Terminal de Pasajeros = L1A: su "#MexibusLinea1" es solo el corredor troncal → deja L1A,
+    # quita L1 (evita que, p. ej., "Loma Bonita" -estación exclusiva de L1A- salga también en L1).
+    if re.search(r"aifa|afia|aeropuerto|felipe angeles|terminal de pasajeros", tn) and 111 in enc:
+        enc.pop(101, None)
     # "Ampliación" de L3 = ramal L3A: sus posts la etiquetan "#MexibusLinea3" (troncal) + "#ampliación"
     # (sin el "3a" pegado). Si aparece "ampliacion" junto a L3, es la L3A → deja L3A y quita L3.
     if re.search(r"ampliacion", tn) and 103 in enc:
