@@ -150,7 +150,7 @@ def lineas_en_texto(tn: str):
 def estado_de(tn: str) -> str:
     if re.search(r"restablec|reanud|normaliz|opera con normalidad", tn):
         return "Servicio restablecido"
-    if re.search(r"realiza circuito|se realiza circuito|\bcircuito\b", tn):
+    if re.search(r"realiza circuito|se realiza circuito|\bcircuitos?\b", tn):
         return "Servicio parcial"   # el circuito manda sobre 'suspende': la línea corre parcial
     if re.search(r"suspend|sin servicio|cierre total|se cierra", tn):
         return "Sin servicio"
@@ -549,6 +549,10 @@ def _autotest():
         "circuitos.\n👉Cto. emergente nte\n🚆UMB - Revolución\nServicio Ordinario\n"
         "👉Cto. emergente sur\n🚆La Raza - Nuevo Laredo\nRetorno en Home Depot\n"
         "Servicio Ordinario\n#MexibusInforma",
+        # Caso real (captura de notificación, 2026-09-30): "circuitos" en plural (no matcheaba
+        # \bcircuito\b en estado_de) y emoji seguido de espacio antes del tramo ("🚆 Ciudad Azteca").
+        "#MexibúsLínea1 debido a la lluvia y alto nivel del agua a la altura de Insurgentes se "
+        "realizan circuitos.\n🚆 Ciudad Azteca - Central de Abastos\n#MexibusInforma",
     ]
     for i, e in enumerate(ejemplos, 1):
         print(f"--- Ejemplo {i} ---")
