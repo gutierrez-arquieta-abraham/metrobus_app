@@ -198,6 +198,14 @@ def info_de(texto: str) -> str:
     return t.strip(" ·,.-")
 
 # ------------------------------------------------------- tramos del circuito ("A - B")
+# Los posts reales marcan cada tramo con un emoji al inicio (p. ej. "🚆UMB - Revolución",
+# "👉Cto. emergente nte"): el regex de abajo (^[A-Za-z...]) no admite un emoji como primer
+# carácter, así que sin este paso el tramo NUNCA matcheaba y segmentos_circuito() regresaba []
+# aunque el post sí traiga tramos -- caso real confirmado: Mexibús L4, lluvia, "se realizan
+# circuitos" con "🚆UMB - Revolución" y "🚆La Raza - Nuevo Laredo". Se quita cualquier prefijo
+# que no sea letra/dígito antes de intentar el match.
+_PREFIJO_NO_TEXTO = re.compile(r"^[^A-Za-zÁÉÍÓÚÑáéíóúñ0-9]+")
+
 def segmentos_circuito(texto: str):
     """Pares [terminal, estacion] de los tramos que SÍ operan cuando hay circuito."""
     if "circuito" not in _norm(texto):
@@ -207,6 +215,7 @@ def segmentos_circuito(texto: str):
         ln = ln.strip(" .")
         if not ln or ln.startswith("#") or "circuito" in ln.lower():
             continue
+        ln = _PREFIJO_NO_TEXTO.sub("", ln)
         m = re.match(r"^([A-Za-zÁÉÍÓÚÑáéíóúñ0-9.\s]{3,32}?)\s+-\s+([A-Za-zÁÉÍÓÚÑáéíóúñ0-9.\s]{3,32}?)$", ln)
         if m:
             segs.append([m.group(1).strip(), m.group(2).strip()])
@@ -534,12 +543,18 @@ def _autotest():
         "#MexibúsInforma ⚠Tome sus precauciones⚠",
         "#MexibúsLínea4 debido a choque de camión de transporte público que invade carril confinado "
         "a la altura de periférico, se realiza circuito.\nClínica 76 - UMB\n#MexibusInforma",
+        # Caso real (captura de notificación, 2026-09-30): tramos con emoji al inicio de línea --
+        # regresión del fix de _PREFIJO_NO_TEXTO en segmentos_circuito().
+        "#MexibúsLínea4 debido a la presencia de lluvia en diferentes puntos, se realizan "
+        "circuitos.\n👉Cto. emergente nte\n🚆UMB - Revolución\nServicio Ordinario\n"
+        "👉Cto. emergente sur\n🚆La Raza - Nuevo Laredo\nRetorno en Home Depot\n"
+        "Servicio Ordinario\n#MexibusInforma",
     ]
     for i, e in enumerate(ejemplos, 1):
         print(f"--- Ejemplo {i} ---")
         for a in parse_post(e):
             print(f"  linea={a['linea']} ({a['etiqueta']}) | estado={a['estado']} | "
-                  f"lugar={a['lugar']!r} | info={a['info']!r}")
+                  f"lugar={a['lugar']!r} | info={a['info']!r} | circuito={a['circuito']!r}")
 
 if __name__ == "__main__":
     import sys
