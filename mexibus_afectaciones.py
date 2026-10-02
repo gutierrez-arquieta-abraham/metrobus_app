@@ -152,6 +152,13 @@ def estado_de(tn: str) -> str:
         return "Servicio restablecido"
     if re.search(r"realiza circuito|se realiza circuito|\bcircuitos?\b", tn):
         return "Servicio parcial"   # el circuito manda sobre 'suspende': la línea corre parcial
+    # "dejando sin servicio a la estación X" (p. ej. contraflujo por manifestación en UNA estación)
+    # SÍ contiene "sin servicio", pero es un cierre puntual de esa estación, no de la línea entera --
+    # caso real confirmado: Mexibús L3, contraflujo en Palacio Municipal, marcaba toda la línea
+    # "Sin servicio" (bloqueaba la troncal completa) en vez de solo esa estación. Se revisa ANTES del
+    # check genérico de abajo para que la frase puntual gane.
+    if re.search(r"sin servicio a (la|las) estacion", tn):
+        return "Estación cerrada"
     if re.search(r"suspend|sin servicio|cierre total|se cierra", tn):
         return "Sin servicio"
     if re.search(r"retras|avance lento|servicio lento|marcha lenta|demora|\blento\b", tn):
