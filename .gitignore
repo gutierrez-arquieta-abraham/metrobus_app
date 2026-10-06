@@ -27,6 +27,7 @@ tts_cache/
 *.bak
 *.bak.*
 app.py.bak.*
+device_alertas.db
 
 # Sistema
 .DS_Store

@@ -66,6 +66,11 @@ except Exception as _e_push:
     def enviar_actualizacion(*_a, **_k):   # no-op si el push no está disponible
         pass
 
+# Alertas de proximidad de unidades guardadas (registro de token/preferencia; el detector y el
+# envío FCM llegan en una etapa posterior, ver device_alertas.py). Sin credencial ni dependencia
+# externa -- es solo SQLite, así que no necesita el mismo try/except que el bloque de arriba.
+import device_alertas
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(APP_DIR, 'data')
 # Panel de afectaciones: el feed (mexibus_afectaciones) escribe FEED_AFECT; los avisos
@@ -483,6 +488,61 @@ def admin_notificar_actualizacion():
     data = request.get_json(silent=True) or {}
     enviar_actualizacion(data.get('titulo', 'Actualización disponible'),
                          data.get('texto', 'Hay una nueva versión de GeoMB.'))
+    return {'ok': True}
+
+
+def _device_id() -> str:
+    return (request.headers.get('X-Device-ID') or '').strip()
+
+
+@app.route('/device/token', methods=['POST'])
+def device_registrar_token():
+    """Registra/actualiza el token FCM de este dispositivo (ver device_alertas.registrar_token).
+    Se llama desde MensajesService.onNewToken() y al activar una alerta por primera vez -- un
+    token nuevo siempre REEMPLAZA al anterior, nunca se acumulan."""
+    device_id = _device_id()
+    if not device_id:
+        return {'ok': False, 'error': 'falta X-Device-ID'}, 400
+    data = request.get_json(silent=True) or {}
+    fcm_token = (data.get('fcmToken') or '').strip()
+    if not fcm_token:
+        return {'ok': False, 'error': 'fcmToken vacio'}, 400
+    device_alertas.registrar_token(device_id, fcm_token)
+    return {'ok': True}
+
+
+@app.route('/device/alerta', methods=['POST'])
+def device_actualizar_alerta():
+    """Activa/actualiza la alerta de proximidad de UNA unidad guardada para este dispositivo.
+    Mismo endpoint para activar y desactivar (alertaActiva=false) -- para quitar la unidad de
+    Guardadas por completo se usa DELETE /device/alerta, no esto."""
+    device_id = _device_id()
+    if not device_id:
+        return {'ok': False, 'error': 'falta X-Device-ID'}, 400
+    data = request.get_json(silent=True) or {}
+    economico = (data.get('economico') or '').strip()
+    if not economico:
+        return {'ok': False, 'error': 'economico vacio'}, 400
+    device_alertas.actualizar_alerta(
+        device_id, economico,
+        alerta_activa=bool(data.get('alertaActiva', False)),
+        radio_alerta_m=data.get('radioAlertaM'),
+    )
+    return {'ok': True}
+
+
+@app.route('/device/alerta', methods=['DELETE'])
+def device_eliminar_alerta():
+    """Baja completa de la preferencia de alerta de una unidad -- se llama cuando la unidad se
+    quita de 'Guardadas' por completo (no solo al apagar su alerta)."""
+    device_id = _device_id()
+    if not device_id:
+        return {'ok': False, 'error': 'falta X-Device-ID'}, 400
+    data = request.get_json(silent=True) or {}
+    economico = (data.get('economico') or '').strip()
+    if not economico:
+        return {'ok': False, 'error': 'economico vacio'}, 400
+    device_alertas.eliminar_alerta(device_id, economico)
     return {'ok': True}
 
 
