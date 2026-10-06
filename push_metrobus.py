@@ -54,6 +54,7 @@ import firebase_admin
 from firebase_admin import credentials, firestore, messaging
 
 import detector_proximidad
+import device_alertas
 
 URL_ESTADO = ("https://incidentesmovilidad.cdmx.gob.mx/public/"
               "bandejaEstadoServicio.xhtml?idMedioTransporte=mb")
@@ -100,6 +101,80 @@ def _push(tema, tipo, linea, estado, lugar, info):
               "lugar": lugar or "", "info": info or ""},
         android=messaging.AndroidConfig(priority="high"),
     ))
+
+
+def enviar_alerta_unidad_cerca(evento):
+    """Envía el evento "unidad_cerca" de detector_proximidad.evaluar_alertas() por FCM -- a UN
+    SOLO dispositivo (el token registrado para evento["device_id"], ver device_tokens), NUNCA a
+    un topic ni broadcast: a diferencia de _push() de arriba (afectaciones, para TODOS los
+    suscritos al tema), esto es inherentemente personal a quien configuró esa alerta.
+
+    Reusa la MISMA inicialización de Firebase Admin que ya usa el resto de este archivo (_init())
+    -- no crea una app ni credenciales aparte.
+
+    El payload (data message, todo como string: así lo exige FCM/Android) NUNCA lleva ubicación
+    del usuario ni del dispositivo -- solo lo que la notificación necesita para mostrarse:
+    económico, línea, distancia aproximada y el radio configurado.
+
+    Si FCM indica que el token ya no sirve (UnregisteredError: desinstalado, token rotado sin
+    que este dispositivo lo haya vuelto a registrar, etc.), se elimina de device_tokens para no
+    reintentarlo cada ciclo -- NUNCA se toca device_alertas: la preferencia del usuario se
+    conserva, solo deja de poder recibir el push hasta que la app registre un token nuevo (ver
+    MensajesService.onNewToken en GeoMB).
+
+    Cualquier otro fallo (red, cuota, credencial temporalmente inválida, etc.) se trata como
+    transitorio: solo se registra. NUNCA se toca dentro_del_radio ni se genera otro evento --
+    detector_proximidad ya decidió que la unidad entró al radio; un fallo de ENTREGA no debe
+    rearmar nada (ver su docstring: es la única autoridad sobre la histéresis).
+
+    Devuelve True si FCM aceptó el envío, False en cualquier otro caso (sin token registrado,
+    token eliminado, fallo transitorio) -- nunca lanza, para que el llamador pueda seguir con el
+    siguiente evento sin que un fallo aquí detenga a los demás (ver
+    _procesar_eventos_proximidad)."""
+    device_id = evento.get("device_id")
+    token = device_alertas.token_de(device_id)
+    if not token:
+        print(f"push: unidad_cerca sin token registrado para device_id={device_id}, no se envia")
+        return False
+
+    _init()
+    linea = evento.get("linea")
+    data = {
+        "tipo": "unidad_cerca",
+        "economico": str(evento.get("economico") or ""),
+        "linea": str(linea) if linea not in (None, "") else "",
+        "distancia_m": str(evento.get("distancia_m") if evento.get("distancia_m") is not None else ""),
+        "radio_m": str(evento.get("radio_m") if evento.get("radio_m") is not None else ""),
+    }
+    try:
+        # token= (no fid=): firebase-admin>=7 marca token= como deprecado en favor de fid=, pero
+        # requirements.txt solo fija >=6.5 -- no hay forma de saber desde aquí qué versión corre
+        # de verdad el EC2, y token= sigue totalmente soportado en todas ellas. Usar fid=
+        # arriesgaría romper el envío si el servidor todavía no tiene la versión que lo introdujo.
+        # Revisar si vale la pena migrar una vez que se confirme la versión real en producción.
+        messaging.send(messaging.Message(
+            token=token,
+            data=data,
+            android=messaging.AndroidConfig(priority="high"),
+        ))
+        return True
+    except messaging.UnregisteredError:
+        device_alertas.eliminar_token(device_id)
+        print(f"push: token invalido/expirado para device_id={device_id}, eliminado")
+        return False
+    except Exception as e:
+        print(f"push: fallo transitorio enviando unidad_cerca a device_id={device_id}: {e}")
+        return False
+
+
+def _procesar_eventos_proximidad(eventos):
+    """Manda cada evento "unidad_cerca" por su cuenta -- un fallo en UNO (red, token inválido,
+    lo que sea: ver enviar_alerta_unidad_cerca) nunca debe impedir que se intenten los demás."""
+    for evento in eventos:
+        try:
+            enviar_alerta_unidad_cerca(evento)
+        except Exception as e:
+            print("push: error enviando unidad_cerca:", e)
 
 
 def _escribir_estado_metrobus(filas):
@@ -379,10 +454,12 @@ def iniciar_monitor():
             # Detector de proximidad de unidades guardadas (ver detector_proximidad.py): reusa
             # este mismo ciclo de ~60s en vez de otro daemon/temporizador aparte. Paso
             # independiente (su propio try/except) a propósito: un fallo aquí nunca debe afectar
-            # el push de afectaciones de arriba, ni viceversa. Todavía NO envía FCM -- solo
-            # detecta y deja listos los eventos "unidad_cerca" (ver su docstring).
+            # el push de afectaciones de arriba, ni viceversa. Cada evento "unidad_cerca" se manda
+            # por FCM a SU dispositivo (ver enviar_alerta_unidad_cerca/_procesar_eventos_proximidad);
+            # un fallo mandando uno nunca debe impedir que se intenten los demás.
             try:
-                detector_proximidad.evaluar_alertas()
+                eventos = detector_proximidad.evaluar_alertas()
+                _procesar_eventos_proximidad(eventos)
             except Exception as e:
                 print("push: error detector proximidad:", e)
             time.sleep(INTERVALO_SEG)
