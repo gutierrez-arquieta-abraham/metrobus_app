@@ -178,6 +178,40 @@ def hay_alguna_alerta_activa(device_id: str) -> bool:
         return bool(row[0]) if row else False
 
 
+def todas_las_alertas_activas() -> list[dict]:
+    """TODAS las filas con alerta_activa=1, de TODOS los dispositivos -- para el detector de
+    proximidad (ver detector_proximidad.evaluar_alertas), que evalúa cada (device_id, economico)
+    de forma independiente contra UNA sola descarga del feed por ciclo, nunca dispositivo por
+    dispositivo."""
+    with _lock, _conexion() as con:
+        rows = con.execute(
+            "SELECT device_id, economico, radio_alerta_m, dentro_del_radio "
+            "FROM device_alertas WHERE alerta_activa = 1"
+        ).fetchall()
+        return [
+            {
+                "device_id": r[0],
+                "economico": r[1],
+                "radio_alerta_m": r[2],
+                "dentro_del_radio": bool(r[3]),
+            }
+            for r in rows
+        ]
+
+
+def actualizar_estado_radio(device_id: str, economico: str, dentro: bool) -> None:
+    """Solo la histéresis (dentro_del_radio) -- ver detector_proximidad.evaluar_alertas. NUNCA
+    toca alerta_activa/radio_alerta_m (eso lo decide el usuario desde Android, ver
+    actualizar_alerta) ni ultima_notificacion_ts (esa columna se actualiza cuando de verdad se
+    mande un push -- etapa posterior, todavía no implementada)."""
+    with _lock, _conexion() as con:
+        con.execute(
+            "UPDATE device_alertas SET dentro_del_radio = ? WHERE device_id = ? AND economico = ?",
+            (1 if dentro else 0, device_id, economico),
+        )
+        con.commit()
+
+
 # ---------------------------------------------------------------- ubicación (una por dispositivo)
 
 def actualizar_ubicacion(device_id: str, lat: float, lon: float, timestamp: int) -> None:

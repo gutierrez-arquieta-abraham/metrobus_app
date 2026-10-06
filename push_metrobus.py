@@ -53,6 +53,8 @@ from bs4 import BeautifulSoup
 import firebase_admin
 from firebase_admin import credentials, firestore, messaging
 
+import detector_proximidad
+
 URL_ESTADO = ("https://incidentesmovilidad.cdmx.gob.mx/public/"
               "bandejaEstadoServicio.xhtml?idMedioTransporte=mb")
 URL_SERVICIOMB = "https://www.metrobus.cdmx.gob.mx/ServicioMB"
@@ -374,6 +376,15 @@ def iniciar_monitor():
                 _ciclo()
             except Exception as e:
                 print("push: error ciclo:", e)
+            # Detector de proximidad de unidades guardadas (ver detector_proximidad.py): reusa
+            # este mismo ciclo de ~60s en vez de otro daemon/temporizador aparte. Paso
+            # independiente (su propio try/except) a propósito: un fallo aquí nunca debe afectar
+            # el push de afectaciones de arriba, ni viceversa. Todavía NO envía FCM -- solo
+            # detecta y deja listos los eventos "unidad_cerca" (ver su docstring).
+            try:
+                detector_proximidad.evaluar_alertas()
+            except Exception as e:
+                print("push: error detector proximidad:", e)
             time.sleep(INTERVALO_SEG)
     threading.Thread(target=loop, daemon=True).start()
 
