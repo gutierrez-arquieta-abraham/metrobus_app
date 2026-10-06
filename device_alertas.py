@@ -17,8 +17,12 @@
 #     de cuántas unidades tenga guardadas").
 #   - device_alertas: preferencia + estado de histéresis por (device_id, economico). Esta
 #     etapa solo implementa el registro/actualización/baja de filas -- el detector de
-#     proximidad (que lee dentro_del_radio/ultima_notificacion_ts) y la tabla device_ubicacion
-#     llegan en una etapa posterior (NO se implementan aquí todavía).
+#     proximidad (que lee dentro_del_radio/ultima_notificacion_ts) llega en una etapa posterior
+#     (NO se implementa aquí todavía).
+#   - device_ubicacion: ÚLTIMA ubicación conocida del dispositivo, UNA fila por device_id (ver
+#     actualizar_ubicacion) -- nunca un historial. Independiente de cuántas unidades tenga
+#     guardadas: el dispositivo tiene una sola ubicación vigente a la vez, igual criterio que
+#     device_tokens para el token FCM.
 #
 # No construye historial: cada upsert REEMPLAZA el valor anterior, nunca se insertan filas
 # nuevas para el mismo (device_id, economico) ni se conserva un registro de cambios.
@@ -55,6 +59,14 @@ def _conexion() -> sqlite3.Connection:
         "  dentro_del_radio INTEGER NOT NULL DEFAULT 0,"
         "  ultima_notificacion_ts INTEGER,"
         "  PRIMARY KEY (device_id, economico)"
+        ")"
+    )
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS device_ubicacion ("
+        "  device_id TEXT PRIMARY KEY,"
+        "  lat REAL NOT NULL,"
+        "  lon REAL NOT NULL,"
+        "  timestamp INTEGER NOT NULL"
         ")"
     )
     return con
@@ -164,3 +176,33 @@ def hay_alguna_alerta_activa(device_id: str) -> bool:
             (device_id,),
         ).fetchone()
         return bool(row[0]) if row else False
+
+
+# ---------------------------------------------------------------- ubicación (una por dispositivo)
+
+def actualizar_ubicacion(device_id: str, lat: float, lon: float, timestamp: int) -> None:
+    """Upsert de la ÚLTIMA ubicación conocida de este dispositivo -- REEMPLAZA la anterior, nunca
+    agrega una fila nueva ni conserva historial (ver el javadoc/comentario del módulo). Android
+    solo llama esto mientras tiene al menos una alerta activa (AlertasUnidadesService); aquí no
+    se valida eso de nuevo -- esta función solo persiste lo que se le pasa."""
+    if not device_id:
+        return
+    with _lock, _conexion() as con:
+        con.execute(
+            "INSERT INTO device_ubicacion (device_id, lat, lon, timestamp) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(device_id) DO UPDATE SET lat = excluded.lat, lon = excluded.lon, "
+            "timestamp = excluded.timestamp",
+            (device_id, float(lat), float(lon), int(timestamp)),
+        )
+        con.commit()
+
+
+def ubicacion_de(device_id: str) -> dict | None:
+    """La última ubicación conocida de este dispositivo, o None si nunca mandó una -- para que
+    el futuro detector de proximidad (push_metrobus.py, etapa posterior) sepa contra qué comparar
+    cada unidad con alerta activa. No se usa todavía en esta etapa."""
+    with _lock, _conexion() as con:
+        row = con.execute(
+            "SELECT lat, lon, timestamp FROM device_ubicacion WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        return {"lat": row[0], "lon": row[1], "timestamp": row[2]} if row else None

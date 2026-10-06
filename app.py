@@ -546,6 +546,29 @@ def device_eliminar_alerta():
     return {'ok': True}
 
 
+@app.route('/device/ubicacion', methods=['POST'])
+def device_actualizar_ubicacion():
+    """Guarda la ÚLTIMA ubicación conocida de este dispositivo (ver
+    device_alertas.actualizar_ubicacion) -- upsert, nunca historial. Android solo llama esto
+    mientras AlertasUnidadesService está corriendo (al menos una alerta activa); este endpoint
+    no vuelve a comprobar eso, solo persiste lat/lon/timestamp."""
+    device_id = _device_id()
+    if not device_id:
+        return {'ok': False, 'error': 'falta X-Device-ID'}, 400
+    data = request.get_json(silent=True) or {}
+    try:
+        lat = float(data.get('lat'))
+        lon = float(data.get('lon'))
+    except (TypeError, ValueError):
+        return {'ok': False, 'error': 'lat/lon invalidos'}, 400
+    try:
+        timestamp = int(data.get('timestamp'))
+    except (TypeError, ValueError):
+        timestamp = int(time.time())
+    device_alertas.actualizar_ubicacion(device_id, lat, lon, timestamp)
+    return {'ok': True}
+
+
 @app.route('/<path:path>')
 def static_files(path):
     return send_from_directory(APP_DIR, path)
