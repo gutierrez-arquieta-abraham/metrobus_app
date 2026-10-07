@@ -19,10 +19,18 @@
         <div class="alert err">Este enlace ya se usó antes. Si no completaste tú la eliminación, pide uno nuevo.</div>
       {% elif motivo == "limite" %}
         <div class="alert err">Hiciste demasiados intentos en poco tiempo. Espera un momento y vuelve a intentarlo.</div>
+      {% elif motivo == "en_proceso" %}
+        <div class="alert err">Ya hay una eliminación en curso con este mismo enlace. Espera un momento antes de
+          volver a intentarlo.</div>
+      {% elif motivo == "fallo_temporal" %}
+        <div class="alert err">No pudimos completar la eliminación por un problema temporal. Tu enlace sigue siendo
+          válido: vuelve a abrirlo e inténtalo de nuevo en unos minutos.</div>
       {% else %}
         <div class="alert err">Este enlace no es válido. Pide uno nuevo desde la página de eliminación de cuenta.</div>
       {% endif %}
-      <p><a class="btn secondary" href="{{ url_for('account.eliminar_cuenta_formulario') }}">Pedir un enlace nuevo</a></p>
+      {% if motivo != "fallo_temporal" %}
+        <p><a class="btn secondary" href="{{ url_for('account.eliminar_cuenta_formulario') }}">Pedir un enlace nuevo</a></p>
+      {% endif %}
     </div>
   {% endif %}
 {% endblock %}

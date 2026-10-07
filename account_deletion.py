@@ -15,9 +15,11 @@
 #   1) Dentro de la app (ConfiguracionFragment -> "Eliminar mi cuenta"), con sesión iniciada:
 #      POST /api/account/delete con Authorization: Bearer <ID token de Firebase> + X-Device-ID.
 #      El uid sale de auth.verify_id_token() (Admin SDK) -- nunca de un campo del cliente. El
-#      X-Device-ID (mismo header que ya usan /device/*) permite borrar también el token FCM, las
-#      alertas de proximidad y la última ubicación de ESTE dispositivo, algo que el flujo web no
-#      puede hacer porque nunca conoce ese identificador.
+#      X-Device-ID (mismo header que ya usan /device/*) SOLO permite borrar el token FCM, las
+#      alertas de proximidad y la última ubicación de ESE dispositivo si el backend puede
+#      demostrar que ese device_id pertenece de verdad a este uid (ver
+#      _verificar_propiedad_device/device_alertas.vincular_device) -- nunca por una simple
+#      comparación de lo que mande el cliente.
 #
 #   2) Página pública GET/POST /delete-account (para Play Console, sin abrir la app): solo pide
 #      el correo. Si existe una cuenta con ese correo (auth.get_user_by_email), se genera un
@@ -27,13 +29,20 @@
 #      mismo mensaje genérico, exista o no la cuenta (anti-enumeración). GET /confirmar solo
 #      MUESTRA una pantalla de confirmación (nunca borra en un GET, para no ejecutar el borrado
 #      si un escáner de correo pre-visita el enlace); la eliminación real ocurre en el POST de
-#      esa misma pantalla, y el token se consume de forma atómica (no se puede repetir).
+#      esa misma pantalla. El token se RECLAMA (lock_ts) antes de intentar el borrado y solo se
+#      marca usado/inservible si la eliminación quedó realmente completa -- si falla, se libera
+#      para poder reintentar con el MISMO enlace (ver _reclamar_token/_marcar_token_usado/
+#      _liberar_token). Nunca se puede ejecutar dos veces en paralelo con el mismo token.
 #
-# Qué se borra (ver delete_account_core): Firebase Authentication (auth.delete_user), el
-# documento usuarios/{uid} y TODO su subárbol de Firestore (telemetria/.../items), la entrada de
-# verificación KYC en kyc_store.json y, solo si se dio X-Device-ID, las filas de ese dispositivo
-# en device_alertas.db. NUNCA se toca reportes/{reportId}: esa colección jamás guarda uid, correo
-# ni deviceId (ver TelemetriaSync.subirReportes en el cliente), así que no hay nada que vincular.
+# Qué se borra (ver delete_account_core) y EN QUÉ ORDEN -- sin transacción distribuida (Firestore
+# y Firebase Auth son sistemas distintos, eso no existe): primero Firestore (usuarios/{uid} y
+# TODO su subárbol), la entrada KYC en kyc_store.json y, si corresponde, el dispositivo; Firebase
+# Authentication (auth.delete_user) se borra AL FINAL y SOLO si todo lo anterior se completó de
+# verdad -- es la única credencial que le permite al usuario volver a autenticarse y reintentar
+# si algo falló a medias. resultado['completo'] es la única señal de éxito real: ni la API ni el
+# flujo por correo reportan éxito si viene en False. NUNCA se toca reportes/{reportId}: esa
+# colección jamás guarda uid, correo ni deviceId (ver TelemetriaSync.subirReportes en el
+# cliente), así que no hay nada que vincular.
 #
 # Nada de esto introduce credenciales nuevas: Firebase Admin ya se inicializa igual que en
 # push_metrobus.py (GOOGLE_APPLICATION_CREDENTIALS ya está en el geomb.env de metrobus-web.service)
@@ -79,6 +88,9 @@ _DB_PATH = Path(__file__).resolve().parent / "account_deletion.db"
 _lock = threading.Lock()
 
 TOKEN_TTL_SEGUNDOS = 30 * 60   # enlace de confirmación por correo: válido 30 minutos
+LOCK_TTL_SEGUNDOS = 120        # cuánto dura el "reclamo" de un token mientras se procesa (ver
+                               # _reclamar_token) antes de poder reintentarse si el proceso se
+                               # cayó a medias -- nunca se marca usado hasta un éxito completo.
 _RE_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 # (clave de limite) -> (maximo de peticiones, ventana en segundos)
@@ -97,6 +109,7 @@ def _conexion() -> sqlite3.Connection:
         "  uid TEXT NOT NULL,"
         "  created_ts INTEGER NOT NULL,"
         "  expires_ts INTEGER NOT NULL,"
+        "  lock_ts INTEGER,"
         "  used_ts INTEGER"
         ")"
     )
@@ -203,7 +216,14 @@ def _borrar_firestore(uid: str) -> bool:
 
 def _borrar_kyc(uid: str) -> bool:
     """kyc_store.json vive en didit_backend.py (solo si ese blueprint cargó -- ver app.py). Si no
-    está disponible en este deploy, no hay nada que borrar: se trata como éxito, no como error."""
+    está disponible en este deploy, no hay nada que borrar: se trata como éxito, no como error.
+
+    IMPORTANTE: didit_backend._save() atrapa sus PROPIAS excepciones de escritura a disco
+    ('except Exception: pass') y nunca las deja subir -- así que un try/except aquí alrededor de
+    kyc_save() NUNCA vería un fallo real de escritura (disco lleno, permisos, etc.), y
+    reportaríamos éxito aunque el archivo no se haya actualizado de verdad. Por eso se VERIFICA
+    el resultado releyendo el archivo después de guardar, en vez de confiar en que "no lanzó"
+    signifique "se guardó"."""
     try:
         from didit_backend import _load as kyc_load, _save as kyc_save, _lock as kyc_lock
     except Exception:
@@ -211,10 +231,12 @@ def _borrar_kyc(uid: str) -> bool:
     try:
         with kyc_lock:
             d = kyc_load()
-            if str(uid) in d:
-                del d[str(uid)]
-                kyc_save(d)
-        return True
+            if str(uid) not in d:
+                return True   # nada que borrar: éxito trivial, idempotente
+            del d[str(uid)]
+            kyc_save(d)
+            releido = kyc_load()
+            return str(uid) not in releido
     except Exception as e:
         print(f"[account] error borrando kyc uid={uid}: {e}", flush=True)
         return False
@@ -241,13 +263,52 @@ def _borrar_device(device_id: str) -> bool:
         return False
 
 
+def _verificar_propiedad_device(uid: str, device_id: str) -> str:
+    """Decide si 'uid' puede borrar los datos de 'device_id'. El backend es la ÚNICA autoridad --
+    NUNCA se confía en que el cliente mande un device_id "suyo": solo se actúa sobre lo que
+    device_alertas.propietario_de() (vínculo registrado por app.py al validar un ID token, ver
+    vincular_device) diga de verdad. Devuelve:
+
+      'propio'       -- hay un vínculo device_owner y coincide con uid: se puede borrar.
+      'sin_datos'    -- el device NO tiene ninguna fila en ninguna tabla (ni vínculo): no hay
+                        nada que proteger, borrar es un no-op seguro sin importar quién lo pida.
+      'otro_usuario' -- hay un vínculo device_owner, pero es de OTRO uid: se rechaza, NUNCA se
+                        toca -- esto es precisamente lo que impide que un usuario autenticado
+                        borre el dispositivo de otro con solo conocer/adivinar su device_id.
+      'no_vinculado' -- el device SÍ tiene datos pero nunca se vinculó a ningún uid (dispositivo
+                        histórico, de antes de esta función, o que aún no mandó un ID token junto
+                        con su X-Device-ID): se rechaza por prudencia. No se "reconstruye" esa
+                        propiedad de forma mágica (ver migración en device_alertas.py)."""
+    propietario = device_alertas.propietario_de(device_id)
+    if propietario is not None:
+        return "propio" if propietario == uid else "otro_usuario"
+    return "sin_datos" if not device_alertas.tiene_datos(device_id) else "no_vinculado"
+
+
 def delete_account_core(uid: str, device_id: str | None = None) -> dict:
     """Elimina TODO lo asociado a esta cuenta. 'uid' SIEMPRE debe venir de una credencial ya
-    verificada por el llamador (_uid_desde_bearer o _consumir_token) -- esta función en sí misma
+    verificada por el llamador (_uid_desde_bearer o _reclamar_token) -- esta función en sí misma
     no vuelve a autenticar nada, confía en que quien la llama ya probó la identidad.
 
-    Idempotente: cada paso ya tolera que su dato no exista (ver cada _borrar_*), así que llamarla
-    dos veces sobre la misma cuenta (p. ej. un reintento de red) nunca falla ni duplica nada.
+    ORDEN Y POLÍTICA DE FALLOS PARCIALES (sin transacción distribuida -- Firestore y Firebase
+    Auth son sistemas distintos, no hay forma real de que esto sea atómico):
+
+      1. Firestore (usuarios/{uid} + subárbol), KYC y -- si 'device_id' pertenece de verdad a
+         este uid (ver _verificar_propiedad_device) -- los datos de ese dispositivo.
+      2. Firebase Authentication, AL FINAL, y SOLO si TODO lo anterior quedó realmente completo.
+
+    Por qué Auth se borra al final y nunca si algo falló antes: es la ÚNICA credencial que le
+    permite al usuario volver a autenticarse (conseguir un ID token nuevo) y reintentar la
+    eliminación. Si se borrara Auth primero y luego fallara Firestore/KYC/device, el usuario se
+    quedaría sin cuenta pero con datos huérfanos, y SIN FORMA de volver a probar su identidad
+    para reintentar por la vía de la app (el flujo por correo tampoco podría resolver un uid que
+    ya no existe en Auth). Conservar Auth hasta el final convierte cualquier fallo parcial en
+    algo RETOMABLE: la próxima llamada (misma app, o el mismo enlace de correo si no se marcó
+    usado -- ver _liberar_token) vuelve a intentar exactamente los pasos que ya son idempotentes
+    por construcción (ver cada _borrar_*), nunca duplica ni dejó nada a medias de forma invisible.
+
+    resultado['completo'] es la única señal de verdad: los llamadores (rutas) NUNCA deben
+    reportar éxito si viene en False, sin importar qué subcampo individual diga True.
 
     NO toca reportes/{reportId}: esa colección nunca guarda uid/correo/deviceId (ver
     TelemetriaSync.subirReportes en el cliente), no existe vínculo que borrar ahí."""
@@ -255,9 +316,30 @@ def delete_account_core(uid: str, device_id: str | None = None) -> dict:
         "uid": uid,
         "firestore": _borrar_firestore(uid),
         "kyc": _borrar_kyc(uid),
-        "auth": _borrar_auth(uid),
-        "device": _borrar_device(device_id) if device_id else None,
+        "device": None,
+        "auth": None,
+        "completo": False,
     }
+
+    device_bloquea = False
+    if device_id:
+        propiedad = _verificar_propiedad_device(uid, device_id)
+        if propiedad in ("propio", "sin_datos"):
+            ok_device = _borrar_device(device_id)
+            resultado["device"] = ok_device
+            device_bloquea = not ok_device
+        else:
+            # 'otro_usuario' / 'no_vinculado': rechazo de seguridad -- nunca se toca ese
+            # dispositivo, y nunca bloquea el resto de la eliminación de ESTA cuenta (ese
+            # dispositivo no es suyo, o no se puede demostrar que lo sea; en cualquier caso no
+            # hay nada de ESTA cuenta ahí que deje de borrarse).
+            resultado["device"] = propiedad
+
+    completo_datos = bool(resultado["firestore"]) and bool(resultado["kyc"]) and not device_bloquea
+    if completo_datos:
+        resultado["auth"] = _borrar_auth(uid)
+    resultado["completo"] = completo_datos and bool(resultado["auth"])
+
     print(f"[account] eliminacion ejecutada uid={uid} device={'si' if device_id else 'no'} "
           f"resultado={resultado}", flush=True)
     return resultado
@@ -317,8 +399,10 @@ def _procesar_solicitud(correo: str) -> None:
 
 
 def _estado_token(token: str) -> str:
-    """'valido' | 'token_invalido' | 'token_usado' | 'token_vencido' -- solo lectura, nunca marca
-    el token como usado (eso lo hace _consumir_token, en el POST de confirmacion)."""
+    """'valido' | 'token_invalido' | 'token_usado' | 'token_vencido' -- solo lectura, nunca
+    reclama ni marca el token (eso lo hace _reclamar_token, en el POST de confirmación). El GET
+    de confirmación usa esto; mostrar la pantalla de confirmación nunca tiene efectos
+    destructivos, sin importar si hay un reclamo (lock_ts) en curso de otra petición."""
     if not token:
         return "token_invalido"
     token_hash = hashlib.sha256(token.encode()).hexdigest()
@@ -336,32 +420,70 @@ def _estado_token(token: str) -> str:
     return "valido"
 
 
-def _consumir_token(token: str) -> str | None:
-    """Marca el token como usado y devuelve el uid -- SOLO si estaba vigente y sin usar. El
-    UPDATE con 'WHERE used_ts IS NULL' es atómico: si dos peticiones llegan con el mismo token al
-    mismo tiempo (doble clic, reintento), solo UNA logra marcarlo (rowcount == 1); la otra
-    recibe None y nunca ejecuta el borrado por segunda vez."""
+def _reclamar_token(token: str) -> tuple[str, str | None]:
+    """Reserva este token para procesarlo -- NUNCA lo marca como usado todavía (eso lo decide el
+    llamador según el resultado real de delete_account_core, ver _marcar_token_usado/
+    _liberar_token). Devuelve (estado, uid):
+
+      'reclamado'      -- se obtuvo el reclamo en exclusiva; procede a delete_account_core(uid).
+      'en_proceso'     -- otra petición ya lo está procesando (lock_ts reciente, < LOCK_TTL_SEGUNDOS).
+      'token_invalido' / 'token_usado' / 'token_vencido' -- igual que _estado_token.
+
+    Concurrencia: el UPDATE de abajo con 'WHERE ... (lock_ts IS NULL OR vencido)' es atómico a
+    nivel de SQLite (un solo escritor a la vez sobre el archivo) y además serializado dentro de
+    este proceso por el Lock de Python -- si dos peticiones llegan con el MISMO token casi al
+    mismo tiempo, solo UNA ve rowcount == 1 y pasa a 'reclamado'; la otra ve el lock ya puesto y
+    recibe 'en_proceso'. Si el proceso que reclamó se cae a medias (nunca llama a
+    _marcar_token_usado ni a _liberar_token), el lock expira solo tras LOCK_TTL_SEGUNDOS y el
+    token vuelve a ser reclamable -- nunca queda inutilizable para siempre por un fallo a medias."""
     if not token:
-        return None
+        return "token_invalido", None
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     ahora = int(time.time())
     with _lock, _conexion() as con:
         row = con.execute(
-            "SELECT uid, expires_ts, used_ts FROM deletion_tokens WHERE token_hash = ?", (token_hash,)
+            "SELECT uid, expires_ts, used_ts, lock_ts FROM deletion_tokens WHERE token_hash = ?",
+            (token_hash,),
         ).fetchone()
         if row is None:
-            return None
-        uid, expires_ts, used_ts = row
-        if used_ts is not None or ahora > expires_ts:
-            return None
+            return "token_invalido", None
+        uid, expires_ts, used_ts, lock_ts = row
+        if used_ts is not None:
+            return "token_usado", None
+        if ahora > expires_ts:
+            return "token_vencido", None
+        if lock_ts is not None and ahora - lock_ts < LOCK_TTL_SEGUNDOS:
+            return "en_proceso", None
         cur = con.execute(
-            "UPDATE deletion_tokens SET used_ts = ? WHERE token_hash = ? AND used_ts IS NULL",
-            (ahora, token_hash),
+            "UPDATE deletion_tokens SET lock_ts = ? WHERE token_hash = ? AND used_ts IS NULL "
+            "AND (lock_ts IS NULL OR ? - lock_ts >= ?)",
+            (ahora, token_hash, ahora, LOCK_TTL_SEGUNDOS),
         )
         con.commit()
         if cur.rowcount != 1:
-            return None
-        return uid
+            return "en_proceso", None
+        return "reclamado", uid
+
+
+def _marcar_token_usado(token: str) -> None:
+    """Se llama SOLO cuando delete_account_core devolvió resultado['completo'] == True -- deja
+    el token definitivamente inservible (ver _estado_token/_reclamar_token: 'token_usado')."""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with _lock, _conexion() as con:
+        con.execute(
+            "UPDATE deletion_tokens SET used_ts = ? WHERE token_hash = ?", (int(time.time()), token_hash)
+        )
+        con.commit()
+
+
+def _liberar_token(token: str) -> None:
+    """Se llama cuando la eliminación quedó INCOMPLETA -- suelta el reclamo (lock_ts = NULL) SIN
+    marcar como usado, para que el mismo enlace de correo pueda reintentarse. NUNCA se llama
+    después de un éxito completo (eso es _marcar_token_usado)."""
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with _lock, _conexion() as con:
+        con.execute("UPDATE deletion_tokens SET lock_ts = NULL WHERE token_hash = ?", (token_hash,))
+        con.commit()
 
 
 # ---------------------------------------------------------------- rutas
@@ -412,19 +534,31 @@ def eliminar_cuenta_confirmar():
     if not _limitar(f"confirmar_ip:{ip}", *LIM_CONFIRMAR_IP):
         return render_template("delete_account_done.html", ok=False, motivo="limite"), 429
     token = (request.form.get("token") or "").strip()
-    uid = _consumir_token(token)
-    if uid is None:
-        return render_template("delete_account_done.html", ok=False, motivo="token_invalido")
-    delete_account_core(uid)
-    return render_template("delete_account_done.html", ok=True)
+    estado, uid = _reclamar_token(token)
+    if estado == "en_proceso":
+        return render_template("delete_account_done.html", ok=False, motivo="en_proceso"), 409
+    if estado != "reclamado":
+        return render_template("delete_account_done.html", ok=False, motivo=estado)
+    resultado = delete_account_core(uid)
+    if resultado["completo"]:
+        _marcar_token_usado(token)
+        return render_template("delete_account_done.html", ok=True)
+    # Incompleto: el token se LIBERA (no se marca usado) para que el mismo enlace pueda
+    # reintentarse -- nunca se deja al usuario sin token y sin cuenta eliminada.
+    _liberar_token(token)
+    return render_template("delete_account_done.html", ok=False, motivo="fallo_temporal"), 500
 
 
 @account_bp.route("/api/account/delete", methods=["POST"])
 def eliminar_cuenta_api():
     """Eliminación desde la app (ConfiguracionFragment): Authorization: Bearer <ID token de
-    Firebase> + X-Device-ID opcional (si se manda, también se limpian los datos de ESE
-    dispositivo en device_alertas.db). El uid nunca sale de un campo del cuerpo -- solo del
-    token verificado (ver _uid_desde_bearer)."""
+    Firebase> + X-Device-ID opcional (si se manda y el backend puede demostrar que ese
+    dispositivo pertenece a este uid -- ver _verificar_propiedad_device -- también se limpian
+    sus datos en device_alertas.db). El uid nunca sale de un campo del cuerpo -- solo del token
+    verificado (ver _uid_desde_bearer). Solo se responde ok=true con HTTP 200 cuando
+    resultado['completo'] es True; cualquier otro caso es HTTP 500 con un mensaje genérico (sin
+    uid, sin detalle de Firebase, sin stack trace) y puede reintentarse: cada paso de
+    delete_account_core ya es idempotente."""
     ip = _ip_cliente()
     if not _limitar(f"api_ip:{ip}", *LIM_API_IP):
         return {"ok": False, "error": "demasiadas solicitudes"}, 429
@@ -434,5 +568,7 @@ def eliminar_cuenta_api():
     if not _limitar(f"api_uid:{uid}", *LIM_API_UID):
         return {"ok": False, "error": "demasiadas solicitudes"}, 429
     device_id = (request.headers.get("X-Device-ID") or "").strip()[:128]
-    delete_account_core(uid, device_id or None)
-    return {"ok": True}
+    resultado = delete_account_core(uid, device_id or None)
+    if resultado["completo"]:
+        return {"ok": True}
+    return {"ok": False, "error": "no se pudo completar la eliminacion, intenta de nuevo"}, 500

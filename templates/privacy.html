@@ -4,8 +4,8 @@
 {% block badge %}Política de privacidad{% endblock %}
 {% block content %}
   <h1>Política de privacidad de GeoMB</h1>
-  <p class="subtitle">Última actualización: 7 de octubre de 2026. Aplica a la app GeoMB (Android) y a este sitio
-    (geomb.duckdns.org).</p>
+  <p class="subtitle">Última actualización: 7 de octubre de 2026 (revisado). Aplica a la app GeoMB (Android) y a
+    este sitio (geomb.duckdns.org).</p>
 
   <div class="card">
     <h2>Responsable</h2>
@@ -106,10 +106,14 @@
     <p>Puedes eliminar tu cuenta y los datos asociados en cualquier momento, desde dentro de la app
       (Configuración → "Eliminar mi cuenta") o desde esta misma web, sin necesidad de abrir la app:</p>
     <p><a class="btn" href="{{ url_for('account.eliminar_cuenta_formulario') }}">Eliminar mi cuenta</a></p>
-    <p class="muted">Al eliminar tu cuenta se borra tu perfil y tu historial de uso de Firestore, tu verificación de
-      identidad (si la tenías) y, si pides la eliminación desde la app, también el token de notificaciones, las
-      alertas de proximidad y la última ubicación guardada de ese dispositivo. Los reportes de irregularidad del
-      servicio y de la app no se borran porque nunca estuvieron ligados a tu cuenta.</p>
+    <p class="muted">Al eliminar tu cuenta se borra tu perfil y tu historial de uso de Firestore y tu verificación de
+      identidad (si la tenías). Si pides la eliminación desde la app <strong>y ese dispositivo quedó reconocido
+      como tuyo</strong> (algo que ocurre automáticamente al usar la app con sesión iniciada), también se borran el
+      token de notificaciones, las alertas de proximidad y la última ubicación guardada de ese dispositivo; si el
+      dispositivo todavía no quedó reconocido, esos datos del dispositivo se conservan hasta que vuelvas a abrir la
+      app con sesión iniciada (lo que los vincula a tu cuenta) o hasta que desactives tus alertas manualmente. Los
+      reportes de irregularidad del servicio y de la app no se borran porque nunca estuvieron ligados a tu cuenta
+      ni a tu dispositivo.</p>
   </div>
 
   <div class="card">

@@ -69,6 +69,20 @@ def _conexion() -> sqlite3.Connection:
         "  timestamp INTEGER NOT NULL"
         ")"
     )
+    # Migración aditiva (no toca las 3 tablas de arriba ni sus filas existentes): vínculo
+    # device_id -> uid de Firebase, SOLO para que la eliminación de cuenta (account_deletion.py)
+    # pueda demostrar que un dispositivo es de quien pide borrarlo. Un device_id de ANTES de esta
+    # tabla (ya con filas en device_tokens/device_alertas/device_ubicacion) simplemente no tiene
+    # fila aquí -- eso se trata como "no se puede demostrar que es suyo" (ver
+    # account_deletion._verificar_propiedad_device), NUNCA se asume ni se reconstruye esa
+    # propiedad; el dispositivo sigue funcionando igual que siempre en /device/* mientras tanto.
+    con.execute(
+        "CREATE TABLE IF NOT EXISTS device_owner ("
+        "  device_id TEXT PRIMARY KEY,"
+        "  uid TEXT NOT NULL,"
+        "  vinculado_ts INTEGER NOT NULL"
+        ")"
+    )
     return con
 
 
@@ -242,19 +256,69 @@ def ubicacion_de(device_id: str) -> dict | None:
         return {"lat": row[0], "lon": row[1], "timestamp": row[2]} if row else None
 
 
+# ---------------------------------------------------------------- vínculo device_id <-> uid
+
+def vincular_device(device_id: str, uid: str) -> None:
+    """Asocia este device_id al uid de Firebase que demostró su identidad (ID token verificado)
+    en la MISMA petición -- ver app.py:device_registrar_token/account_deletion._uid_desde_bearer.
+    Es la ÚNICA fuente de verdad que account_deletion usa para decidir si puede borrar los datos
+    de un dispositivo al eliminar una cuenta (ver _verificar_propiedad_device). Upsert: si el
+    dispositivo ya estaba vinculado a otro uid (p. ej. un dispositivo compartido donde ahora
+    inicia sesión otra persona), el vínculo se actualiza al uid autenticado AHORA -- mismo
+    criterio que el resto del módulo (la fila vigente refleja el estado más reciente, nunca se
+    acumula historial)."""
+    if not device_id or not uid:
+        return
+    with _lock, _conexion() as con:
+        con.execute(
+            "INSERT INTO device_owner (device_id, uid, vinculado_ts) VALUES (?, ?, ?) "
+            "ON CONFLICT(device_id) DO UPDATE SET uid = excluded.uid, vinculado_ts = excluded.vinculado_ts",
+            (device_id, uid, int(time.time())),
+        )
+        con.commit()
+
+
+def propietario_de(device_id: str) -> str | None:
+    """El uid vinculado a este device_id, o None si nunca se vinculó (dispositivo histórico o
+    que todavía no mandó un ID token junto con su X-Device-ID)."""
+    with _lock, _conexion() as con:
+        row = con.execute(
+            "SELECT uid FROM device_owner WHERE device_id = ?", (device_id,)
+        ).fetchone()
+        return row[0] if row else None
+
+
+def tiene_datos(device_id: str) -> bool:
+    """True si este device_id tiene AL MENOS una fila en alguna de las 3 tablas originales
+    (token, alguna alerta o ubicación) -- distingue un device_id realmente inexistente (nada que
+    proteger, borrarlo es un no-op seguro para cualquiera) de uno histórico sin vínculo
+    registrado (sí hay datos, pero no se puede demostrar de quién son) -- ver
+    account_deletion._verificar_propiedad_device."""
+    with _lock, _conexion() as con:
+        for tabla in ("device_tokens", "device_alertas", "device_ubicacion"):
+            row = con.execute(
+                f"SELECT EXISTS(SELECT 1 FROM {tabla} WHERE device_id = ?)", (device_id,)
+            ).fetchone()
+            if row and row[0]:
+                return True
+        return False
+
+
 # ---------------------------------------------------------------- borrado completo (1 dispositivo)
 
 def eliminar_todo_device(device_id: str) -> None:
-    """Borra TODAS las filas de este device_id en las 3 tablas -- token FCM, alertas de
-    proximidad (todas las unidades guardadas) y última ubicación conocida. Lo usa la eliminación
-    de cuenta (ver account_deletion.py) cuando la app manda su propio X-Device-ID junto con el
-    ID token verificado: limpia lo que este backend guarda POR DISPOSITIVO, que nunca se vincula
-    al uid de Firebase (ver el docstring del módulo). Un DELETE sobre filas que no existen no
-    falla -- la función es idempotente por construcción, igual que el resto de este módulo."""
+    """Borra TODAS las filas de este device_id -- token FCM, alertas de proximidad (todas las
+    unidades guardadas), última ubicación conocida y su vínculo de propiedad (device_owner, si
+    tenía uno). Lo usa la eliminación de cuenta (ver account_deletion.py) SOLO después de haber
+    verificado la propiedad del dispositivo (_verificar_propiedad_device) -- esta función en sí
+    misma no vuelve a comprobar nada, confía en que el llamador ya lo hizo. Un DELETE sobre filas
+    que no existen no falla -- la función es idempotente por construcción, igual que el resto de
+    este módulo."""
     if not device_id:
         return
     with _lock, _conexion() as con:
         con.execute("DELETE FROM device_tokens WHERE device_id = ?", (device_id,))
         con.execute("DELETE FROM device_alertas WHERE device_id = ?", (device_id,))
         con.execute("DELETE FROM device_ubicacion WHERE device_id = ?", (device_id,))
+        con.execute("DELETE FROM device_owner WHERE device_id = ?", (device_id,))
         con.commit()

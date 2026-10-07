@@ -134,10 +134,14 @@ except Exception as _e:
 
 # Política de privacidad + eliminación de cuenta: GET /privacy, GET/POST /delete-account(/confirmar),
 # POST /api/account/delete. Requiere account_deletion.py + firebase-admin (ya es dependencia del push).
+# Se importa el MÓDULO completo (no solo account_bp): device_registrar_token() de abajo reusa su
+# _uid_desde_bearer() para vincular device_id<->uid -- ver _vincular_device_si_hay_sesion.
 try:
-    from account_deletion import account_bp
-    app.register_blueprint(account_bp)
+    import account_deletion
+    app.register_blueprint(account_deletion.account_bp)
+    _ACCOUNT_DISPONIBLE = True
 except Exception as _e:
+    _ACCOUNT_DISPONIBLE = False
     print(f'[account] blueprint no cargado: {_e}', flush=True)
 
 
@@ -508,6 +512,23 @@ def _device_id() -> str:
     return (request.headers.get('X-Device-ID') or '').strip()
 
 
+def _vincular_device_si_hay_sesion(device_id: str) -> None:
+    """Si esta petición trae ADEMÁS un ID token de Firebase válido (Authorization: Bearer...),
+    vincula este device_id a ese uid -- ver device_alertas.vincular_device y
+    account_deletion._verificar_propiedad_device (la ÚNICA forma de que la eliminación de cuenta
+    pueda borrar más adelante los datos de ESTE dispositivo). Opcional y aditivo a propósito: el
+    cliente Android actual todavía no manda ese header aquí, así que esto no cambia NADA para
+    ningún dispositivo existente -- mismo comportamiento de siempre si el header no llega."""
+    if not _ACCOUNT_DISPONIBLE:
+        return
+    try:
+        uid = account_deletion._uid_desde_bearer()
+        if uid:
+            device_alertas.vincular_device(device_id, uid)
+    except Exception as e:
+        log(f'[!] Error vinculando device/uid (no bloqueante): {e}')
+
+
 @app.route('/device/token', methods=['POST'])
 def device_registrar_token():
     """Registra/actualiza el token FCM de este dispositivo (ver device_alertas.registrar_token).
@@ -521,6 +542,7 @@ def device_registrar_token():
     if not fcm_token:
         return {'ok': False, 'error': 'fcmToken vacio'}, 400
     device_alertas.registrar_token(device_id, fcm_token)
+    _vincular_device_si_hay_sesion(device_id)
     return {'ok': True}
 
 
