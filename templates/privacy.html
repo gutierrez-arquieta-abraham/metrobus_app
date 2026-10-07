@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Política de privacidad — GeoMB{% endblock %}
+{% block description %}Política de privacidad de GeoMB: qué datos se recopilan, para qué se usan, con quién se comparten y cómo eliminar tu cuenta.{% endblock %}
+{% block badge %}Política de privacidad{% endblock %}
+{% block content %}
+  <h1>Política de privacidad de GeoMB</h1>
+  <p class="subtitle">Última actualización: 7 de octubre de 2026. Aplica a la app GeoMB (Android) y a este sitio
+    (geomb.duckdns.org).</p>
+
+  <div class="card">
+    <h2>Responsable</h2>
+    <p>GeoMB es un proyecto independiente desarrollado por <strong>Abraham Gutiérrez</strong>, estudiante del
+      Instituto Politécnico Nacional (IPN). No está afiliado oficialmente al Metrobús de la Ciudad de México, al
+      Mexibús ni al Mexicable; los datos de ubicación y tiempos de las unidades son estimaciones.</p>
+    <p>Contacto para dudas sobre privacidad o tus datos:
+      <a href="mailto:agutierreza2303@alumno.ipn.mx">agutierreza2303@alumno.ipn.mx</a> o
+      <a href="mailto:abraham566712@gmail.com">abraham566712@gmail.com</a>.</p>
+  </div>
+
+  <div class="card">
+    <h2>Qué datos recopilamos</h2>
+
+    <h3>Cuenta (inicio de sesión)</h3>
+    <p>GeoMB solo permite iniciar sesión con <strong>Google Sign-In a través de Firebase Authentication</strong> —
+      no hay registro con correo/contraseña ni con teléfono. Al iniciar sesión guardamos tu correo, tu nombre y un
+      identificador único de cuenta (uid) en nuestra base de datos (Firestore), además de la fecha de tu último
+      acceso y si ya aceptaste el aviso de privacidad dentro de la app. Tu foto de perfil se muestra directamente
+      desde la URL que da Google; GeoMB no la almacena en sus propios servidores.</p>
+
+    <h3>Perfil dentro de la app</h3>
+    <p>Si nos dices que eres "usuario aficionado" (entusiasta del transporte) o si tienes movilidad reducida (para
+      recibir avisos de elevadores fuera de servicio), guardamos esa preferencia junto a tu cuenta.</p>
+
+    <h3>Uso del transporte (solo con sesión iniciada)</h3>
+    <p>Si inicias sesión, se sincronizan a tu cuenta: los recorridos que hiciste con el planificador, los eventos de
+      estación de esos recorridos, errores que la app detectó durante el recorrido, tus búsquedas de unidades por
+      número económico y tus unidades/económicos guardados como favoritos. Sin sesión iniciada, esta información se
+      queda únicamente en tu propio teléfono.</p>
+
+    <h3>Identificador de dispositivo</h3>
+    <p>Al instalar la app se genera un identificador aleatorio propio de esa instalación (no está ligado al hardware
+      del teléfono ni a tu cuenta de Google). Se usa para: limitar el uso del asistente conversacional del mapa, y
+      para las alertas de proximidad de unidades guardadas que se explican abajo.</p>
+
+    <h3>Ubicación</h3>
+    <p>GeoMB pide permiso de ubicación para centrar el mapa en tu posición y, si así lo decides, para avisarte
+      cuando una unidad que guardaste esté cerca de ti (alerta de proximidad). Mientras tengas <strong>al menos una
+      alerta de proximidad activa</strong>, tu última ubicación conocida se envía a nuestro servidor —
+      <strong>solo la más reciente, nunca un historial de recorrido</strong> — y se usa exclusivamente para calcular
+      esa distancia. Si desactivas todas tus alertas, la app deja de enviar tu ubicación.</p>
+
+    <h3>Notificaciones push (Firebase Cloud Messaging)</h3>
+    <p>Usamos el token de notificaciones de tu dispositivo para mandarte: avisos de afectaciones al servicio
+      (manifestaciones, mantenimiento, cierres), avisos de actualización de la app, avisos de elevadores fuera de
+      servicio (solo si marcaste movilidad reducida) y el aviso personal de que una unidad guardada está cerca.</p>
+
+    <h3>Verificación de identidad (KYC)</h3>
+    <p>Para poder enviar un <em>reporte de irregularidad del servicio</em> (no un reporte de un problema de la app),
+      te pedimos verificar tu identidad una vez. Esa verificación la procesa un tercero, <strong>Didit</strong>
+      (identificación oficial y una foto facial en vivo), conforme a su propio aviso de privacidad. GeoMB
+      <strong>nunca recibe ni almacena tu identificación ni tu rostro</strong> — únicamente recibimos y guardamos tu
+      nombre validado y una marca de "verificado" ligada a tu cuenta.</p>
+
+    <h3>Reportes de un problema de la app</h3>
+    <p>Si usas la opción "Reportar un problema de la app" (distinta del reporte de irregularidad del servicio),
+      guardamos la descripción que escribas junto con información técnica de diagnóstico (modelo y versión de
+      Android, estado de la conectividad, contexto de línea/estación en ese momento). Estos reportes
+      <strong>no se vinculan a tu cuenta, tu correo ni tu identificador de dispositivo</strong> — se guardan de
+      forma independiente, aunque hayas iniciado sesión o no.</p>
+
+    <h3>Publicidad</h3>
+    <p>GeoMB muestra anuncios mediante <strong>Google AdMob</strong>. Según tu ubicación y tu elección en el
+      formulario de consentimiento (que puedes revisar en Configuración → "Opciones de privacidad", cuando esté
+      disponible para tu región), AdMob puede usar identificadores de publicidad para personalizar o medir esos
+      anuncios conforme a sus propias políticas.</p>
+  </div>
+
+  <div class="card">
+    <h2>Con quién se comparten estos datos</h2>
+    <ul>
+      <li><strong>Google / Firebase</strong> — autenticación (Firebase Authentication), base de datos (Firestore),
+        notificaciones (Firebase Cloud Messaging), mapas (Google Maps SDK) y anuncios (AdMob).</li>
+      <li><strong>Amazon Web Services</strong> — síntesis de voz (Amazon Polly) para las locuciones de voz durante el
+        recorrido guiado con voz.</li>
+      <li><strong>Didit</strong> — verificación de identidad (KYC), solo si decides enviar un reporte de
+        irregularidad del servicio.</li>
+    </ul>
+    <p class="muted">GeoMB no vende tus datos a nadie ni los comparte con terceros para fines distintos a los que
+      se describen aquí.</p>
+  </div>
+
+  <div class="card">
+    <h2>Cuánto tiempo conservamos tus datos</h2>
+    <ul>
+      <li>Datos de tu cuenta y de uso del transporte: mientras tu cuenta exista.</li>
+      <li>Identificador de dispositivo, token de notificaciones, alertas de proximidad y última ubicación: mientras
+        sigas usando esa instalación de la app, o hasta que elimines tu cuenta (ver abajo) o desactives tus
+        alertas.</li>
+      <li>Reportes de irregularidad del servicio y reportes de la app: al no estar ligados a tu identidad, se
+        conservan con fines estadísticos y de mejora del servicio.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>Eliminar tu cuenta y tus datos</h2>
+    <p>Puedes eliminar tu cuenta y los datos asociados en cualquier momento, desde dentro de la app
+      (Configuración → "Eliminar mi cuenta") o desde esta misma web, sin necesidad de abrir la app:</p>
+    <p><a class="btn" href="{{ url_for('account.eliminar_cuenta_formulario') }}">Eliminar mi cuenta</a></p>
+    <p class="muted">Al eliminar tu cuenta se borra tu perfil y tu historial de uso de Firestore, tu verificación de
+      identidad (si la tenías) y, si pides la eliminación desde la app, también el token de notificaciones, las
+      alertas de proximidad y la última ubicación guardada de ese dispositivo. Los reportes de irregularidad del
+      servicio y de la app no se borran porque nunca estuvieron ligados a tu cuenta.</p>
+  </div>
+
+  <div class="card">
+    <h2>Tus derechos</h2>
+    <p>Puedes solicitarnos en cualquier momento acceder a tus datos, corregirlos o eliminarlos (ver arriba)
+      escribiendo a cualquiera de los correos de contacto de este aviso.</p>
+  </div>
+
+  <div class="card">
+    <h2>Cambios a este aviso</h2>
+    <p>Si cambiamos esta política, actualizaremos la fecha al inicio de esta página. Te recomendamos revisarla de
+      vez en cuando.</p>
+  </div>
+{% endblock %}

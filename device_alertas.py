@@ -240,3 +240,21 @@ def ubicacion_de(device_id: str) -> dict | None:
             "SELECT lat, lon, timestamp FROM device_ubicacion WHERE device_id = ?", (device_id,)
         ).fetchone()
         return {"lat": row[0], "lon": row[1], "timestamp": row[2]} if row else None
+
+
+# ---------------------------------------------------------------- borrado completo (1 dispositivo)
+
+def eliminar_todo_device(device_id: str) -> None:
+    """Borra TODAS las filas de este device_id en las 3 tablas -- token FCM, alertas de
+    proximidad (todas las unidades guardadas) y última ubicación conocida. Lo usa la eliminación
+    de cuenta (ver account_deletion.py) cuando la app manda su propio X-Device-ID junto con el
+    ID token verificado: limpia lo que este backend guarda POR DISPOSITIVO, que nunca se vincula
+    al uid de Firebase (ver el docstring del módulo). Un DELETE sobre filas que no existen no
+    falla -- la función es idempotente por construcción, igual que el resto de este módulo."""
+    if not device_id:
+        return
+    with _lock, _conexion() as con:
+        con.execute("DELETE FROM device_tokens WHERE device_id = ?", (device_id,))
+        con.execute("DELETE FROM device_alertas WHERE device_id = ?", (device_id,))
+        con.execute("DELETE FROM device_ubicacion WHERE device_id = ?", (device_id,))
+        con.commit()

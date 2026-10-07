@@ -8,7 +8,8 @@ Sirve la web + datos en vivo + afectaciones + push FCM. Producción: `https://ge
   - Ubicación en el server: `/home/ubuntu/metrobus_app` · env: `/home/ubuntu/geomb.env` (+ drop-in `kyc.conf` con llaves Didit).
   - Sirve: `/` (index.html), `/data/vehicles.json` (posiciones en vivo, feed Sonda GTFS-rt), `/data/routes.json`,
     `/data/afectaciones_mexibus.json` (panel, ver abajo), `/data/modelos.csv`, `/health`.
-  - Blueprints: `didit_backend.py` (KYC `/api/didit/*`), `tts_backend.py` (voz Polly `/api/tts`), `admin_afect.py` (panel afectaciones).
+  - Blueprints: `didit_backend.py` (KYC `/api/didit/*`), `tts_backend.py` (voz Polly `/api/tts`), `admin_afect.py` (panel afectaciones),
+    `account_deletion.py` (`GET /privacy`, `GET/POST /delete-account(/confirmar)`, `POST /api/account/delete` — cumplimiento Google Play).
 - **`metrobus-push.service`** → `push_metrobus.py` en `/home/ubuntu`. Raspa el estado de Metrobús (gov) + elevadores/mantenimiento,
   empuja por FCM (topic `afectaciones`) **y escribe `metrobus_app/data/afect_metrobus.json`** (estado persistente para el panel).
 - **`mexibus-afectaciones.service`** → `mexibus_afectaciones.py` en `/opt/geomb-afect`. Sondea 3 feeds RSS.app de SITRAMYTEM →

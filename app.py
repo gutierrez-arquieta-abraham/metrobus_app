@@ -42,6 +42,11 @@ Variables de entorno:
   MB_RT_URL          (opcional/fallback) link .proto de 12 h ya firmado
   ADMIN_TOKEN        (opcional/fallback) token para POST /admin/rt_url
   FIREBASE_CREDENTIALS_JSON  (opcional) service account de Firebase para el push
+  ACCOUNT_DELETE_BASE_URL    (opcional) dominio público para el enlace de /delete-account por
+                             correo; default https://geomb.duckdns.org. Reusa GMAIL_ADDRESS/
+                             GMAIL_APP_PASSWORD y GOOGLE_APPLICATION_CREDENTIALS/
+                             FIREBASE_CREDENTIALS_JSON (ver account_deletion.py), ninguna
+                             credencial nueva.
 Ejecutar:  python app.py
 """
 import email
@@ -126,6 +131,14 @@ try:
     app.register_blueprint(admin_afect_bp)
 except Exception as _e:
     print(f'[admin_afect] blueprint no cargado: {_e}', flush=True)
+
+# Política de privacidad + eliminación de cuenta: GET /privacy, GET/POST /delete-account(/confirmar),
+# POST /api/account/delete. Requiere account_deletion.py + firebase-admin (ya es dependencia del push).
+try:
+    from account_deletion import account_bp
+    app.register_blueprint(account_bp)
+except Exception as _e:
+    print(f'[account] blueprint no cargado: {_e}', flush=True)
 
 
 def log(msg):

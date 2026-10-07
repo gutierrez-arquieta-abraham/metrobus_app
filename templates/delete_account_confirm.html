@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Confirmar eliminación — GeoMB{% endblock %}
+{% block badge %}Eliminación de cuenta{% endblock %}
+{% block content %}
+  <h1>Confirmar eliminación de tu cuenta</h1>
+  <div class="card">
+    <div class="alert err">Esta acción es definitiva y no se puede deshacer.</div>
+    <p>Al confirmar, eliminaremos de inmediato:</p>
+    <ul>
+      <li>Tu cuenta de inicio de sesión.</li>
+      <li>Tu perfil y tu historial de uso (recorridos, búsquedas, favoritos, errores registrados).</li>
+      <li>Tu verificación de identidad, si la tenías.</li>
+    </ul>
+    <form method="post" action="{{ url_for('account.eliminar_cuenta_confirmar') }}">
+      <input type="hidden" name="token" value="{{ token }}">
+      <button type="submit">Sí, eliminar mi cuenta definitivamente</button>
+    </form>
+  </div>
+{% endblock %}

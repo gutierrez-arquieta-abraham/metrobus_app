@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Eliminar mi cuenta — GeoMB{% endblock %}
+{% block description %}Elimina tu cuenta de GeoMB y los datos asociados.{% endblock %}
+{% block badge %}Eliminación de cuenta{% endblock %}
+{% block content %}
+  <h1>Eliminar mi cuenta de GeoMB</h1>
+  <p class="subtitle">Esta página te permite pedir la eliminación definitiva de tu cuenta sin necesidad de abrir la
+    app. Por tu seguridad, solo podemos eliminar la cuenta que de verdad controlas: verificamos tu identidad por
+    correo antes de borrar nada.</p>
+
+  <div class="card">
+    <h2>Qué se elimina</h2>
+    <ul>
+      <li>Tu cuenta de inicio de sesión (Google Sign-In / Firebase Authentication).</li>
+      <li>Tu perfil y tu historial de uso guardado en nuestra base de datos (recorridos, búsquedas, favoritos,
+        errores registrados).</li>
+      <li>Tu verificación de identidad (KYC), si la tenías.</li>
+    </ul>
+    <h2>Qué puede conservarse</h2>
+    <p>Los reportes de irregularidad del servicio o de la app que hayas enviado <strong>no se eliminan</strong>,
+      porque nunca se guardaron ligados a tu cuenta, correo ni dispositivo (son anónimos desde que se crean) — no
+      hay nada que vincular a tu identidad para borrarlos. Si quieres eliminar también el token de notificaciones y
+      las alertas guardadas de tu teléfono, hazlo desde la app (Configuración → "Eliminar mi cuenta"), donde
+      identificamos automáticamente ese dispositivo.</p>
+    <h2>Cómo se verifica que eres tú</h2>
+    <p>Escribe el correo con el que inicias sesión en GeoMB. Si existe una cuenta con ese correo, te mandaremos un
+      enlace de confirmación de un solo uso, válido por 30 minutos. Nadie puede eliminar tu cuenta con solo conocer
+      tu correo: hace falta que tú abras ese enlace desde tu propio correo.</p>
+  </div>
+
+  <div class="card">
+    {% if error %}
+      <div class="alert err">Ese correo no parece válido. Revísalo e inténtalo otra vez.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('account.eliminar_cuenta_solicitar') }}">
+      <label for="email">Correo de tu cuenta GeoMB</label>
+      <input type="email" id="email" name="email" placeholder="tucorreo@ejemplo.com" required>
+      <button type="submit">Enviar enlace de confirmación</button>
+    </form>
+  </div>
+{% endblock %}

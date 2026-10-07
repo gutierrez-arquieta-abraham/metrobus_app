@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}GeoMB{% endblock %}</title>
+<meta name="description" content="{% block description %}GeoMB — transporte en tiempo real para Metrobús, Mexibús y Mexicable de la Ciudad de México y el Estado de México.{% endblock %}">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
+    --text:#e8eaed; --muted:#9aa0ac; --accent:#c8103e; --accent2:#ff5a7a;
+    --ok:#2ecc71;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;min-height:100%;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:var(--bg);color:var(--text);}
+  body{background-image:radial-gradient(circle at 15% 0%, rgba(200,16,62,.25), transparent 45%),
+                      radial-gradient(circle at 85% 15%, rgba(255,90,122,.12), transparent 40%);}
+  .wrap{max-width:760px;margin:0 auto;padding:40px 20px 72px;}
+  .badge{display:inline-flex;align-items:center;gap:8px;padding:6px 14px;border-radius:999px;
+    background:var(--panel2);border:1px solid var(--border);font-size:12px;color:var(--muted);
+    letter-spacing:.4px;text-transform:uppercase;font-weight:600;}
+  .badge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px var(--accent2);}
+  h1{font-size:34px;line-height:1.15;margin:20px 0 6px;font-weight:800;letter-spacing:-.5px;
+    background:linear-gradient(135deg,#fff 30%,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent;}
+  .subtitle{font-size:16px;color:var(--muted);margin:0 0 28px;max-width:60ch;}
+  .card{background:linear-gradient(180deg,var(--panel),var(--panel2));border:1px solid var(--border);
+    border-radius:16px;padding:24px 26px;margin-bottom:16px;box-shadow:0 10px 30px rgba(0,0,0,.25);}
+  .card h2{font-size:18px;margin:0 0 10px;font-weight:700;color:var(--accent2);}
+  .card h3{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:18px 0 6px;}
+  .card p, .card li{margin:0 0 10px;line-height:1.65;color:var(--text);font-size:15px;}
+  .card ul, .card ol{margin:0 0 10px;padding-left:20px;}
+  .card p.muted{color:var(--muted);font-size:13px;}
+  a{color:#ff9aad;text-decoration:none;font-weight:600;}
+  a:hover{text-decoration:underline;}
+  label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px;font-weight:600;}
+  input[type=email]{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--border);
+    background:var(--panel2);color:var(--text);font-size:15px;margin-bottom:14px;}
+  button, .btn{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;border-radius:10px;
+    border:none;background:var(--accent);color:#fff;font-size:15px;font-weight:700;cursor:pointer;
+    font-family:inherit;}
+  .btn.secondary{background:var(--panel2);border:1px solid var(--border);color:var(--text);}
+  .alert{padding:12px 14px;border-radius:10px;margin-bottom:14px;font-size:14px;}
+  .alert.err{background:rgba(255,90,122,.12);border:1px solid rgba(255,90,122,.4);color:var(--accent2);}
+  .alert.ok{background:rgba(46,204,113,.12);border:1px solid rgba(46,204,113,.4);color:var(--ok);}
+  footer{margin-top:32px;color:var(--muted);font-size:12px;text-align:center;}
+  footer a{color:var(--muted);}
+  @media (max-width:600px){h1{font-size:27px;} .card{padding:18px;}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="badge"><span class="dot"></span>{% block badge %}GeoMB{% endblock %}</span>
+  {% block content %}{% endblock %}
+  <footer>GeoMB &middot; geomb.duckdns.org &middot; Proyecto independiente, no afiliado oficialmente
+    al Metrobús de la Ciudad de México, al Mexibús ni al Mexicable.</footer>
+</div>
+</body>
+</html>
