@@ -8,7 +8,9 @@ gtfs-realtime-bindings>=1.0        # provee google.transit.gtfs_realtime_pb2 (ja
 firebase-admin>=6.5
 beautifulsoup4>=4.12               # provee bs4
 
-# Voz TTS (tts_backend.py — AWS Polly, voz Mia). Requiere credenciales AWS en el entorno.
+# Voz TTS (tts_backend.py — AWS Polly, voz Mia; Fish Audio, voz Ximena). Polly requiere
+# credenciales AWS en el entorno; Ximena requiere FISH_AUDIO_API_KEY en el entorno
+# (requests ya está arriba).
 boto3>=1.34
 
 # Servicio de afectaciones Mexibús (mexibus_afectaciones.py):
