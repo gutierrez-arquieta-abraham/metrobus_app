@@ -111,9 +111,13 @@
     #afectPanel{width:min(300px, calc(100vw - 24px));}
   }
 
-  /* InfoWindow de Google Maps (popup de unidad): tema oscuro, igual que el resto de la UI. */
-  .gm-style .gm-style-iw-c, .gm-style .gm-style-iw-d{background:var(--panel2) !important;}
-  .gm-style .gm-style-iw-t::after{background:var(--panel2) !important;}
+  /* InfoWindow de Google Maps (popup de unidad): tema oscuro, igual que el resto de la UI.
+     Nombres de clase reales (inspeccionados en vivo, no documentados por Google y pueden
+     cambiar entre versiones): .gm-style-iw-chr es el header que envuelve el botón de cerrar
+     -- sin esto se quedaba blanco (la franja junto al botón "X"); la colita del globo usa
+     .gm-style-iw-tc (NO .gm-style-iw-t, que no existe en esta versión). */
+  .gm-style .gm-style-iw-c, .gm-style .gm-style-iw-d, .gm-style .gm-style-iw-chr{background:var(--panel2) !important;}
+  .gm-style .gm-style-iw-tc::after{background:var(--panel2) !important;}
   .gm-style .gm-style-iw-d{color:var(--text);}
   .gm-ui-hover-effect > span{background-color:var(--text) !important;}
 </style>
