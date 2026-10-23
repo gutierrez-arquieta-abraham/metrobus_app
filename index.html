@@ -4,7 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Metrobús CDMX — Mapa en tiempo real</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
@@ -50,23 +49,88 @@
   .veh-meta{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px;}
   #count{font-size:12px;color:var(--muted);padding:8px 16px 0;}
   .empty{padding:20px 16px;color:var(--muted);font-size:13px;text-align:center;}
-  .leaflet-popup-content-wrapper{background:var(--panel2);color:var(--text);border-radius:10px;}
-  .leaflet-popup-tip{background:var(--panel2);}
   .popup-eco{font-weight:700;font-size:14px;margin-bottom:4px;}
   .popup-row{font-size:12px;color:var(--muted);margin-top:2px;}
   .clear-btn{background:none;border:none;color:var(--accent);font-size:11px;cursor:pointer;padding:0;margin-left:8px;}
   #statusBar{padding:6px 16px;font-size:11px;color:var(--muted);background:var(--panel2);border-top:1px solid var(--border);}
   ::-webkit-scrollbar{width:6px;}
   ::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+  /* Chips de sistema (Metrobús/Mexibús/Mexicable): igual que .chip, pero de ancho completo
+     en una fila (son pocos, 3 como máximo) para que se lean bien en pantalla angosta. */
+  .sys-row{display:flex;gap:6px;}
+  .sys-row .chip{flex:1;text-align:center;}
+
+  /* Botón flotante de afectaciones + su panel. z-index por encima de los controles propios del
+     mapa (zoom +/-, etc.) para que no quede tapado. */
+  #afectBtn{
+    position:absolute; top:12px; right:12px; z-index:1100; background:var(--panel);
+    color:var(--text); border:1px solid var(--border); border-radius:999px; padding:8px 14px;
+    font-size:12px; font-weight:600; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4);
+  }
+  #afectBtn.alerta{border-color:var(--accent); color:var(--accent);}
+  #afectPanel{
+    position:absolute; top:52px; right:12px; z-index:1100; width:300px; max-height:70vh;
+    overflow-y:auto; background:var(--panel); border:1px solid var(--border); border-radius:10px;
+    box-shadow:0 4px 16px rgba(0,0,0,.5); display:none; padding:10px;
+  }
+  #afectPanel.open{display:block;}
+  #afectPanel h3{margin:0 0 8px;font-size:13px;}
+  .afect-card{
+    background:var(--panel2); border:1px solid var(--border); border-radius:8px; padding:8px 10px;
+    margin-bottom:8px; font-size:12px;
+  }
+  .afect-card .afect-linea{font-weight:700; margin-bottom:3px;}
+  .afect-card .afect-estado{color:var(--accent); font-weight:600;}
+  .afect-card .afect-info{color:var(--muted); margin-top:3px;}
+
+  /* Botón de menú (solo visible en angosto) para mostrar/ocultar el sidebar como overlay. */
+  #menuBtn{display:none;}
+
+  /* Angosto (teléfono: Safari de iOS incluido) -- el sidebar de 360px fijo no entra en pantalla.
+     Se vuelve un panel que se superpone al mapa, oculto por defecto. */
+  @media (max-width:768px){
+    #app{flex-direction:column;}
+    #sidebar{
+      position:absolute; inset:0; width:100%; min-width:0; z-index:1200;
+      transform:translateX(-100%); transition:transform .2s ease; max-width:100%;
+    }
+    #sidebar.open{transform:translateX(0);}
+    #map{width:100%; height:100%;}
+    #menuBtn{
+      display:block; position:absolute; top:12px; left:12px; z-index:1100; background:var(--panel);
+      color:var(--text); border:1px solid var(--border); border-radius:999px; padding:8px 12px;
+      font-size:16px; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4);
+    }
+    #afectPanel{width:min(300px, calc(100vw - 24px));}
+  }
+
+  /* InfoWindow de Google Maps (popup de unidad): tema oscuro, igual que el resto de la UI. */
+  .gm-style .gm-style-iw-c, .gm-style .gm-style-iw-d{background:var(--panel2) !important;}
+  .gm-style .gm-style-iw-t::after{background:var(--panel2) !important;}
+  .gm-style .gm-style-iw-d{color:var(--text);}
+  .gm-ui-hover-effect > span{background-color:var(--text) !important;}
 </style>
 </head>
 <body>
+<button id="menuBtn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
+<button id="afectBtn" onclick="toggleAfectPanel()">⚠ Afectaciones</button>
+<div id="afectPanel"></div>
 <div id="app">
   <div id="sidebar">
     <header>
-      <h1>🚌 Metrobús CDMX</h1>
-      <p>Mapa de líneas y unidades en servicio</p>
+      <h1>🚌 GeoMB — Mapa CDMX/Edomex</h1>
+      <p>Metrobús, Mexibús y Mexicable en un mismo mapa</p>
     </header>
+
+    <div class="section">
+      <h2>Sistema en el mapa</h2>
+      <div class="sys-row">
+        <div class="chip active" id="chipMetrobus" onclick="toggleSistema('metrobus')">Metrobús</div>
+        <div class="chip active" id="chipMexibus" onclick="toggleSistema('mexibus')">Mexibús</div>
+        <div class="chip active" id="chipMexicable" onclick="toggleSistema('mexicable')">Mexicable</div>
+      </div>
+    </div>
 
     <div class="section">
       <h2>Buscar unidad (número económico)</h2>
@@ -100,28 +164,48 @@
   <div id="map"></div>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
 <script>
+// Estilo oscuro del mapa (equivalente al tile dark_all que se usaba con Leaflet/CARTO).
+const DARK_MAP_STYLE = [
+  {elementType:'geometry', stylers:[{color:'#17191f'}]},
+  {elementType:'labels.text.stroke', stylers:[{color:'#17191f'}]},
+  {elementType:'labels.text.fill', stylers:[{color:'#8a90a0'}]},
+  {featureType:'administrative', elementType:'geometry', stylers:[{color:'#2a2f3a'}]},
+  {featureType:'poi', stylers:[{visibility:'off'}]},
+  {featureType:'road', elementType:'geometry', stylers:[{color:'#2a2f3a'}]},
+  {featureType:'road', elementType:'labels.text.fill', stylers:[{color:'#6b7280'}]},
+  {featureType:'road.highway', elementType:'geometry', stylers:[{color:'#38414e'}]},
+  {featureType:'transit', stylers:[{visibility:'off'}]},
+  {featureType:'water', elementType:'geometry', stylers:[{color:'#0f1115'}]},
+  {featureType:'water', elementType:'labels.text.fill', stylers:[{color:'#515c6d'}]},
+];
+
 const LINE_COLORS = {
   '1':'#D40D0D','2':'#F29F05','3':'#7A9A01','4':'#8C1AA6',
   '5':'#8A5A2E','6':'#E44599','7':'#0090C1'
 };
 
 let routesData = [], stopsData = [], vehiclesData = [], empresaMap = {};
-let map, stopsLayer, routesLayer, vehicleMarkers = {};
+let mexibusLineas = [];   // Mexibús (101-104/111-113) + Mexicable (201-202), ver data/mexibus_mapa.json
+let map, stopsLayer, routesLayer, vehicleMarkers = {}, vehicleInfoWindow;
+let mexibusLayer, mexicableLayer;
 let selectedLine = null, selectedEco = null;
+const sistemasActivos = {metrobus:true, mexibus:true, mexicable:true};
 
 const routeById = {};
 
 async function loadData(){
-  const [routesRes, stopsRes, vehiclesRes] = await Promise.all([
-    fetch('data/routes.json'), fetch('data/stops.json'), fetch('data/vehicles.json')
+  const [routesRes, stopsRes, vehiclesRes, mexibusRes] = await Promise.all([
+    fetch('data/routes.json'), fetch('data/stops.json'), fetch('data/vehicles.json'),
+    fetch('data/mexibus_mapa.json').catch(()=>null)
   ]);
   routesData = await routesRes.json();
   stopsData = await stopsRes.json();
   vehiclesData = await vehiclesRes.json();
   routesData.forEach(r => routeById[r.route_id] = r);
+  try { mexibusLineas = mexibusRes && mexibusRes.ok ? (await mexibusRes.json()).lineas : []; }
+  catch(e) { mexibusLineas = []; }   // sin este archivo, el mapa sigue funcionando solo con Metrobús
 
   // Optional empresas CSV — silently ignored if missing
   try {
@@ -140,12 +224,15 @@ async function loadData(){
   initMap();
   drawRoutes();
   drawStops();
+  drawMexibus();
   buildLineChips();
   buildSelects();
   drawVehicles();
   renderList();
 
   startLivePolling();
+  refreshAfectaciones();
+  setInterval(refreshAfectaciones, POLL_MS);
 }
 
 // ---- Polling de tiempo real ----
@@ -174,18 +261,29 @@ async function refreshVehicles(){
   }
 }
 
+// "Capa" aquí es solo un array de overlays (Polyline/Marker) de Google Maps -- a diferencia de
+// Leaflet, la API de Google no tiene un LayerGroup nativo; mostrar/ocultar es poner/quitar cada
+// overlay de su propio map con .setMap(map|null).
+function capaVacia(arr){ arr.forEach(o => o.setMap(null)); arr.length = 0; }
+
 function initMap(){
-  map = L.map('map', {zoomControl:true}).setView([19.4326,-99.1332], 12);
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution:'&copy; OpenStreetMap &copy; CARTO',
-    subdomains:'abcd', maxZoom:19
-  }).addTo(map);
-  routesLayer = L.layerGroup().addTo(map);
-  stopsLayer = L.layerGroup().addTo(map);
+  map = new google.maps.Map(document.getElementById('map'), {
+    center:{lat:19.4326, lng:-99.1332}, zoom:12, styles:DARK_MAP_STYLE,
+    disableDefaultUI:false, fullscreenControl:false, streetViewControl:false, mapTypeControl:false,
+  });
+  routesLayer = []; stopsLayer = []; mexibusLayer = []; mexicableLayer = [];
+  // Una sola InfoWindow compartida (reusarla cierra la anterior al abrir otra -- mismo
+  // comportamiento que los popups de Leaflet, que se cerraban solos al abrir uno nuevo). No se
+  // puede crear a nivel de módulo: `google.maps` no existe hasta que el script de Maps carga.
+  vehicleInfoWindow = new google.maps.InfoWindow();
+}
+
+function toLatLngPath(pares){
+  return pares.map(([lat,lon]) => ({lat, lng:lon}));
 }
 
 function drawRoutes(){
-  routesLayer.clearLayers();
+  capaVacia(routesLayer);
   const seen = new Set();
   routesData.forEach(r => {
     if (!r.shape || !r.shape.length) return;
@@ -194,43 +292,133 @@ function drawRoutes(){
     if (seen.has(key)) return;
     seen.add(key);
     const color = LINE_COLORS[r.line] || r.color || '#888';
-    L.polyline(r.shape, {color, weight:3, opacity:0.55}).addTo(routesLayer);
+    routesLayer.push(new google.maps.Polyline({
+      path: toLatLngPath(r.shape), strokeColor:color, strokeWeight:3, strokeOpacity:0.55, map,
+    }));
   });
 }
 
 function drawStops(){
-  stopsLayer.clearLayers();
+  capaVacia(stopsLayer);
   stopsData.forEach(s => {
-    L.circleMarker([s.lat, s.lon], {
-      radius:3, color:'#ffffff', fillColor:'#ffffff', fillOpacity:0.8, weight:1, opacity:0.6
-    }).bindTooltip(s.name, {direction:'top'}).addTo(stopsLayer);
+    stopsLayer.push(new google.maps.Marker({
+      position:{lat:s.lat, lng:s.lon}, map, title:s.name,
+      icon:{path:google.maps.SymbolPath.CIRCLE, scale:3, fillColor:'#ffffff', fillOpacity:0.8,
+            strokeColor:'#ffffff', strokeWeight:1, strokeOpacity:0.6},
+    }));
   });
+}
+
+// Mexibús (101-104 ordinario, 111-113 ramales) + Mexicable (201-202), ver data/mexibus_mapa.json.
+// No hay posiciones en vivo para estos sistemas (ni en la app Android ni aquí: el feed de
+// vehicles.json es exclusivo de la API oficial de Metrobús) -- solo trazo de ruta + estaciones.
+function drawMexibus(){
+  capaVacia(mexibusLayer);
+  capaVacia(mexicableLayer);
+  mexibusLineas.forEach(l => {
+    const esMexicable = l.numero >= 200;
+    const capa = esMexicable ? mexicableLayer : mexibusLayer;
+    if (l.ruta && l.ruta.length > 1) {
+      // Mexicable: línea punteada (icons repetidos, strokeOpacity:0 en el trazo base) para
+      // distinguirla de Mexibús a simple vista -- igual que el dashArray que usaba Leaflet.
+      const opciones = {path: toLatLngPath(l.ruta), strokeColor:l.color, strokeWeight:3, map};
+      if (esMexicable) {
+        opciones.strokeOpacity = 0;
+        opciones.icons = [{icon:{path:'M 0,-1 0,1', strokeOpacity:1, scale:2}, offset:'0', repeat:'10px'}];
+      } else {
+        opciones.strokeOpacity = 0.75;
+      }
+      capa.push(new google.maps.Polyline(opciones));
+    }
+    (l.estaciones || []).forEach(e => {
+      capa.push(new google.maps.Marker({
+        position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (${l.nombre})`,
+        icon:{path:google.maps.SymbolPath.CIRCLE, scale:4, fillColor:l.color, fillOpacity:0.9,
+              strokeColor:l.color, strokeWeight:1.5},
+      }));
+    });
+  });
+}
+
+function toggleSistema(sistema){
+  sistemasActivos[sistema] = !sistemasActivos[sistema];
+  document.getElementById('chip' + sistema.charAt(0).toUpperCase() + sistema.slice(1))
+    .classList.toggle('active', sistemasActivos[sistema]);
+  const capasPorSistema = {
+    metrobus: [routesLayer, stopsLayer],
+    mexibus: [mexibusLayer],
+    mexicable: [mexicableLayer],
+  };
+  capasPorSistema[sistema].forEach(capa => {
+    capa.forEach(o => o.setMap(sistemasActivos[sistema] ? map : null));
+  });
+  if (sistema === 'metrobus') { drawVehicles(); }   // los camiones van sobre el mapa, no en una capa propia
+}
+
+// ---- Afectaciones (Mexibús + Metrobús, fusionadas por el servidor en data/afectaciones_mexibus.json) ----
+async function refreshAfectaciones(){
+  try {
+    const res = await fetch('data/afectaciones_mexibus.json', {cache:'no-store'});
+    if (!res.ok) return;
+    const doc = await res.json();
+    renderAfectaciones(doc.afectaciones || []);
+  } catch(e) { /* panel se deja como estaba; no bloquea el resto del mapa */ }
+}
+
+function renderAfectaciones(lista){
+  const btn = document.getElementById('afectBtn');
+  const panel = document.getElementById('afectPanel');
+  btn.classList.toggle('alerta', lista.length > 0);
+  btn.textContent = lista.length ? `⚠ Afectaciones (${lista.length})` : '✓ Sin afectaciones';
+  if (!lista.length) {
+    panel.innerHTML = '<h3>Afectaciones</h3><div class="empty">Sin afectaciones activas.</div>';
+    return;
+  }
+  panel.innerHTML = '<h3>Afectaciones</h3>' + lista.map(a => `
+    <div class="afect-card">
+      <div class="afect-linea">Línea ${escapeHtml(a.linea)}</div>
+      <div class="afect-estado">${escapeHtml(a.estado || '')}</div>
+      ${a.lugar ? `<div>${escapeHtml(a.lugar)}</div>` : ''}
+      ${a.info ? `<div class="afect-info">${escapeHtml(a.info)}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+// Los textos de afectaciones vienen de un feed externo (Mexibús) o del panel admin -- no son
+// estáticos de este archivo -- así que se escapan antes de insertarse en el DOM (XSS).
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toggleAfectPanel(){
+  document.getElementById('afectPanel').classList.toggle('open');
 }
 
 function busIcon(color){
-  return L.divIcon({
-    className:'', html:`<div style="
-      background:${color};width:16px;height:16px;border-radius:50%;
-      border:2px solid #fff;box-shadow:0 0 4px rgba(0,0,0,.6);
-      display:flex;align-items:center;justify-content:center;"></div>`,
-    iconSize:[16,16], iconAnchor:[8,8]
-  });
+  return {
+    path: google.maps.SymbolPath.CIRCLE, scale:8, fillColor:color, fillOpacity:1,
+    strokeColor:'#ffffff', strokeWeight:2,
+  };
 }
 
 function drawVehicles(){
-  Object.values(vehicleMarkers).forEach(m => map.removeLayer(m));
+  Object.values(vehicleMarkers).forEach(m => m.setMap(null));
   vehicleMarkers = {};
   filteredVehicles().forEach(v => {
     const color = LINE_COLORS[v.line] || '#bbb';
-    const marker = L.marker([v.lat, v.lon], {icon: busIcon(color)});
-    marker.bindPopup(`
-      <div class="popup-eco">Eco. ${v.label}</div>
-      <div class="popup-row">Línea ${v.line || '—'} · Ruta ${v.route_id}</div>
-      <div class="popup-row">${v.origen || '—'} → ${v.destino || '—'}</div>
-      <div class="popup-row">Empresa: ${v.empresa}</div>
-      <div class="popup-row">Placa: ${v.plate || '—'}</div>
-    `);
-    marker.addTo(map);
+    const marker = new google.maps.Marker({
+      position:{lat:v.lat, lng:v.lon}, map, icon: busIcon(color),
+    });
+    marker.addListener('click', () => {
+      vehicleInfoWindow.setContent(`
+        <div class="popup-eco">Eco. ${escapeHtml(v.label)}</div>
+        <div class="popup-row">Línea ${escapeHtml(v.line || '—')} · Ruta ${escapeHtml(v.route_id)}</div>
+        <div class="popup-row">${escapeHtml(v.origen || '—')} → ${escapeHtml(v.destino || '—')}</div>
+        <div class="popup-row">Empresa: ${escapeHtml(v.empresa)}</div>
+        <div class="popup-row">Placa: ${escapeHtml(v.plate || '—')}</div>
+      `);
+      vehicleInfoWindow.open(map, marker);
+    });
     vehicleMarkers[v.id] = marker;
   });
 }
@@ -333,8 +521,9 @@ function renderList(){
 function focusVehicle(id){
   const marker = vehicleMarkers[id];
   if (!marker) return;
-  map.flyTo(marker.getLatLng(), 15, {duration:0.6});
-  marker.openPopup();
+  map.panTo(marker.getPosition());
+  map.setZoom(15);
+  google.maps.event.trigger(marker, 'click');
 }
 
 document.getElementById('searchBox').addEventListener('input', ()=>{drawVehicles();renderList();});
@@ -342,7 +531,18 @@ document.getElementById('destinoSelect').addEventListener('change', ()=>{drawVeh
 document.getElementById('routeSelect').addEventListener('change', ()=>{drawVehicles();renderList();});
 document.getElementById('empresaSelect').addEventListener('change', ()=>{drawVehicles();renderList();});
 
-loadData();
+// loadData() arranca cuando el script de Google Maps avisa que ya cargó (callback), no antes --
+// initMap() necesita `google.maps` ya definido.
+window.iniciarMapa = function(){ loadData(); };
+window.gm_authFailure = function(){
+  document.getElementById('statusBar').textContent =
+    'No se pudo cargar Google Maps (key/dominio no autorizado). Revisa la consola.';
+};
 </script>
+<!-- Misma API key que usa la app Android (com.google.android.geo.API_KEY en AndroidManifest.xml),
+     restringida por referrer a este dominio en Google Cloud Console -- no es secreta: las keys de
+     Maps JavaScript API se exponen al cliente por diseño, la protección es la restricción de
+     dominio, no el secreto de la key (ver gm_authFailure arriba para cuando esa restricción falla). -->
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBVWqLHPP_BgAX0y1qewGY98-zk00McoSo&callback=iniciarMapa&loading=async" async></script>
 </body>
 </html>
