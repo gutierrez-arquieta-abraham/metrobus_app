@@ -52,7 +52,8 @@ def main():
             "nombre": l.get("nombre", ""),
             "color": l.get("color", "#888888"),
             "estaciones": [
-                {"nombre": sin_prefijo(e.get("n", "")), "lat": e["lat"], "lon": e["lon"]}
+                {"nombre": sin_prefijo(e.get("n", "")), "lat": e["lat"], "lon": e["lon"],
+                 "icono": e.get("icono", "")}
                 for e in l.get("estaciones", [])
             ],
             "ruta": l.get("ruta", []),

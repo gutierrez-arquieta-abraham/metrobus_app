@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Metrobús CDMX — Mapa en tiempo real</title>
+<link rel="icon" type="image/webp" href="icons/app/ic_launcher.webp">
 <style>
   :root{
     --bg:#0f1115; --panel:#171a21; --panel2:#1e222b; --border:#2a2f3a;
@@ -15,7 +16,9 @@
   #sidebar{width:360px;min-width:300px;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
   #map{flex:1;}
   header{padding:14px 16px 10px;border-bottom:1px solid var(--border);}
-  header h1{font-size:16px;margin:0 0 2px;font-weight:700;letter-spacing:.2px;}
+  header h1{font-size:16px;margin:0 0 2px;font-weight:700;letter-spacing:.2px;display:flex;align-items:center;gap:8px;}
+  .app-logo{width:22px;height:22px;border-radius:5px;flex-shrink:0;}
+  .line-icon{width:18px;height:18px;object-fit:contain;flex-shrink:0;vertical-align:middle;}
   header p{margin:0;font-size:12px;color:var(--muted);}
   .section{padding:12px 16px;border-bottom:1px solid var(--border);}
   .section h2{font-size:11px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 8px;}
@@ -28,6 +31,7 @@
   .chip{
     padding:5px 10px;border-radius:999px;border:1px solid var(--border);background:var(--panel2);
     font-size:12px;cursor:pointer;color:var(--text);user-select:none;transition:.15s;
+    display:inline-flex;align-items:center;gap:5px;
   }
   .chip.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600;}
   select{
@@ -44,7 +48,9 @@
   .veh-eco{font-weight:700;font-size:14px;}
   .veh-line{
     font-size:11px;font-weight:700;color:#fff;padding:2px 8px;border-radius:6px;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:4px;
   }
+  .veh-line .line-icon{width:14px;height:14px;}
   .veh-route{font-size:12px;color:var(--muted);margin-top:3px;}
   .veh-meta{font-size:11px;color:var(--muted);margin-top:4px;display:flex;gap:10px;}
   #count{font-size:12px;color:var(--muted);padding:8px 16px 0;}
@@ -119,7 +125,7 @@
 <div id="app">
   <div id="sidebar">
     <header>
-      <h1>🚌 GeoMB — Mapa CDMX/Edomex</h1>
+      <h1><img src="icons/app/ic_launcher.webp" alt="" class="app-logo"> GeoMB — Mapa CDMX/Edomex</h1>
       <p>Metrobús, Mexibús y Mexicable en un mismo mapa</p>
     </header>
 
@@ -331,10 +337,14 @@ function drawMexibus(){
       capa.push(new google.maps.Polyline(opciones));
     }
     (l.estaciones || []).forEach(e => {
+      // Pictograma real de GeoMB cuando existe (icons/estaciones/, ver tools/sync_iconos_geomb.py);
+      // si no (p. ej. estación nueva aún no sincronizada), cae al círculo de color de siempre.
+      const icon = e.icono
+        ? {url:`icons/estaciones/${e.icono}.png`, scaledSize:new google.maps.Size(22,22)}
+        : {path:google.maps.SymbolPath.CIRCLE, scale:4, fillColor:l.color, fillOpacity:0.9,
+           strokeColor:l.color, strokeWeight:1.5};
       capa.push(new google.maps.Marker({
-        position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (${l.nombre})`,
-        icon:{path:google.maps.SymbolPath.CIRCLE, scale:4, fillColor:l.color, fillOpacity:0.9,
-              strokeColor:l.color, strokeWeight:1.5},
+        position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (${l.nombre})`, icon,
       }));
     });
   });
@@ -430,7 +440,7 @@ function buildLineChips(){
   lines.forEach(line => {
     const chip = document.createElement('div');
     chip.className = 'chip';
-    chip.textContent = 'Línea ' + line;
+    chip.innerHTML = `<img class="line-icon" src="icons/lineas/linea_${line}.png" alt="" onerror="this.remove()"> Línea ${line}`;
     chip.style.borderColor = LINE_COLORS[line];
     chip.onclick = () => {
       selectedLine = selectedLine === line ? null : line;
@@ -507,7 +517,9 @@ function renderList(){
     <div class="veh-item" onclick="focusVehicle('${v.id}')">
       <div class="veh-top">
         <span class="veh-eco">Eco. ${v.label}</span>
-        <span class="veh-line" style="background:${LINE_COLORS[v.line]||'#666'}">L${v.line||'-'}</span>
+        <span class="veh-line" style="background:${LINE_COLORS[v.line]||'#666'}">
+          ${v.line ? `<img class="line-icon" src="icons/lineas/linea_${v.line}.png" alt="" onerror="this.remove()">` : ''}L${v.line||'-'}
+        </span>
       </div>
       <div class="veh-route">${v.origen||'—'} → ${v.destino||'—'}</div>
       <div class="veh-meta">
