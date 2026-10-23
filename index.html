@@ -196,7 +196,15 @@ let routesData = [], stopsData = [], vehiclesData = [], empresaMap = {};
 let mexibusLineas = [];   // Mexibús (101-104/111-113) + Mexicable (201-202), ver data/mexibus_mapa.json
 let metrobusLineas = [];  // Metrobús 1-7 CON pictograma real, ver data/metrobus_estaciones.json
 let map, stopsLayer, routesLayer, vehicleMarkers = {}, vehicleInfoWindow;
-let mexibusLayer, mexicableLayer;
+let mexibusRoutesLayer, mexibusStopsLayer, mexicableRoutesLayer, mexicableStopsLayer;
+// Debajo de este zoom, las ~300 estaciones de Metrobús (7 líneas que se cruzan todas por el
+// centro) se amontonan tanto en pantalla que el pictograma dibujado AL ÚLTIMO (la última línea
+// del bucle) tapa visualmente a los demás donde se encimen -- parecía que solo existiera esa
+// línea. En vez de perseguir el z-index (no arregla el amontonamiento, solo cambia quién gana),
+// los pictogramas de estación de los 3 sistemas se ocultan hasta que haya espacio real en
+// pantalla para distinguirlos; las rutas trazadas (líneas de color) se ven siempre, a cualquier
+// zoom -- igual que un mapa de transporte real.
+const ZOOM_PICTOGRAMAS_MIN = 14;
 let selectedLine = null, selectedEco = null;
 const sistemasActivos = {metrobus:true, mexibus:true, mexicable:true};
 
@@ -281,11 +289,27 @@ function initMap(){
     center:{lat:19.4326, lng:-99.1332}, zoom:12, styles:DARK_MAP_STYLE,
     disableDefaultUI:false, fullscreenControl:false, streetViewControl:false, mapTypeControl:false,
   });
-  routesLayer = []; stopsLayer = []; mexibusLayer = []; mexicableLayer = [];
+  routesLayer = []; stopsLayer = [];
+  mexibusRoutesLayer = []; mexibusStopsLayer = [];
+  mexicableRoutesLayer = []; mexicableStopsLayer = [];
   // Una sola InfoWindow compartida (reusarla cierra la anterior al abrir otra -- mismo
   // comportamiento que los popups de Leaflet, que se cerraban solos al abrir uno nuevo). No se
   // puede crear a nivel de módulo: `google.maps` no existe hasta que el script de Maps carga.
   vehicleInfoWindow = new google.maps.InfoWindow();
+  map.addListener('zoom_changed', actualizarVisibilidadEstaciones);
+}
+
+// Solo las capas de ESTACIONES (pictogramas); las de rutas (routesLayer/mexibus.../mexicable...
+// Routes) se quedan siempre visibles mientras su sistema esté activo, a cualquier zoom.
+function actualizarVisibilidadEstaciones(){
+  const lejos = map.getZoom() < ZOOM_PICTOGRAMAS_MIN;
+  const capas = {
+    metrobus: stopsLayer, mexibus: mexibusStopsLayer, mexicable: mexicableStopsLayer,
+  };
+  for (const sistema in capas) {
+    const visible = sistemasActivos[sistema] && !lejos;
+    capas[sistema].forEach(o => o.setMap(visible ? map : null));
+  }
 }
 
 function toLatLngPath(pares){
@@ -321,30 +345,32 @@ function drawStops(){
           : {path:google.maps.SymbolPath.CIRCLE, scale:3, fillColor:'#ffffff', fillOpacity:0.8,
              strokeColor:'#ffffff', strokeWeight:1, strokeOpacity:0.6};
         stopsLayer.push(new google.maps.Marker({
-          position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (Línea ${l.numero})`, icon,
+          position:{lat:e.lat, lng:e.lon}, title:`${e.nombre} (Línea ${l.numero})`, icon,
         }));
       });
     });
-    return;
+  } else {
+    stopsData.forEach(s => {
+      stopsLayer.push(new google.maps.Marker({
+        position:{lat:s.lat, lng:s.lon}, title:s.name,
+        icon:{path:google.maps.SymbolPath.CIRCLE, scale:3, fillColor:'#ffffff', fillOpacity:0.8,
+              strokeColor:'#ffffff', strokeWeight:1, strokeOpacity:0.6},
+      }));
+    });
   }
-  stopsData.forEach(s => {
-    stopsLayer.push(new google.maps.Marker({
-      position:{lat:s.lat, lng:s.lon}, map, title:s.name,
-      icon:{path:google.maps.SymbolPath.CIRCLE, scale:3, fillColor:'#ffffff', fillOpacity:0.8,
-            strokeColor:'#ffffff', strokeWeight:1, strokeOpacity:0.6},
-    }));
-  });
+  actualizarVisibilidadEstaciones();   // recién creadas: arrancan sin .setMap(), según el zoom actual
 }
 
 // Mexibús (101-104 ordinario, 111-113 ramales) + Mexicable (201-202), ver data/mexibus_mapa.json.
 // No hay posiciones en vivo para estos sistemas (ni en la app Android ni aquí: el feed de
 // vehicles.json es exclusivo de la API oficial de Metrobús) -- solo trazo de ruta + estaciones.
 function drawMexibus(){
-  capaVacia(mexibusLayer);
-  capaVacia(mexicableLayer);
+  capaVacia(mexibusRoutesLayer); capaVacia(mexibusStopsLayer);
+  capaVacia(mexicableRoutesLayer); capaVacia(mexicableStopsLayer);
   mexibusLineas.forEach(l => {
     const esMexicable = l.numero >= 200;
-    const capa = esMexicable ? mexicableLayer : mexibusLayer;
+    const capaRutas = esMexicable ? mexicableRoutesLayer : mexibusRoutesLayer;
+    const capaEst = esMexicable ? mexicableStopsLayer : mexibusStopsLayer;
     if (l.ruta && l.ruta.length > 1) {
       // Mexicable: línea punteada (icons repetidos, strokeOpacity:0 en el trazo base) para
       // distinguirla de Mexibús a simple vista -- igual que el dashArray que usaba Leaflet.
@@ -355,7 +381,7 @@ function drawMexibus(){
       } else {
         opciones.strokeOpacity = 0.75;
       }
-      capa.push(new google.maps.Polyline(opciones));
+      capaRutas.push(new google.maps.Polyline(opciones));
     }
     (l.estaciones || []).forEach(e => {
       // Pictograma real de GeoMB cuando existe (icons/estaciones/, ver tools/sync_iconos_geomb.py);
@@ -364,25 +390,25 @@ function drawMexibus(){
         ? {url:`icons/estaciones/${e.icono}.png`, scaledSize:new google.maps.Size(22,22)}
         : {path:google.maps.SymbolPath.CIRCLE, scale:4, fillColor:l.color, fillOpacity:0.9,
            strokeColor:l.color, strokeWeight:1.5};
-      capa.push(new google.maps.Marker({
-        position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (${l.nombre})`, icon,
+      capaEst.push(new google.maps.Marker({
+        position:{lat:e.lat, lng:e.lon}, title:`${e.nombre} (${l.nombre})`, icon,
       }));
     });
   });
+  actualizarVisibilidadEstaciones();   // recién creadas: arrancan sin .setMap(), según el zoom actual
 }
 
 function toggleSistema(sistema){
   sistemasActivos[sistema] = !sistemasActivos[sistema];
   document.getElementById('chip' + sistema.charAt(0).toUpperCase() + sistema.slice(1))
     .classList.toggle('active', sistemasActivos[sistema]);
-  const capasPorSistema = {
-    metrobus: [routesLayer, stopsLayer],
-    mexibus: [mexibusLayer],
-    mexicable: [mexicableLayer],
+  // Las rutas (trazo de color) se ven siempre que el sistema esté activo, a cualquier zoom; las
+  // estaciones (pictogramas) además respetan el umbral de zoom -- ver actualizarVisibilidadEstaciones().
+  const rutasPorSistema = {
+    metrobus: routesLayer, mexibus: mexibusRoutesLayer, mexicable: mexicableRoutesLayer,
   };
-  capasPorSistema[sistema].forEach(capa => {
-    capa.forEach(o => o.setMap(sistemasActivos[sistema] ? map : null));
-  });
+  rutasPorSistema[sistema].forEach(o => o.setMap(sistemasActivos[sistema] ? map : null));
+  actualizarVisibilidadEstaciones();
   if (sistema === 'metrobus') { drawVehicles(); }   // los camiones van sobre el mapa, no en una capa propia
 }
 
