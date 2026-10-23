@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Copia al mapa web los elementos gráficos de la app Android (logo + iconos de línea de
-Metrobús + pictogramas de estación de Mexibús/Mexicable), desde el checkout de GeoMB --
-mismo checkout/convención que tools/sync_mexibus_mapa.py.
+"""Copia al mapa web los elementos gráficos de la app Android: logo, logos de línea de
+Metrobús, y los pictogramas reales de estación de los 3 sistemas (Metrobús/Mexibús/
+Mexicable), desde el checkout de GeoMB -- mismo checkout/convención que
+tools/sync_mexibus_mapa.py y tools/sync_metrobus_estaciones.py.
 
-Los pictogramas de estación de Metrobús (ic_est_<línea>_<n>) NO se copian: esa numeración la
-arma en vivo Iconos.java a partir del índice de la estación en la RUTA (no hay un campo
-"icono" fijo por estación como en mexibus.json), y el stops.json que ya usa este mapa viene
-de una fuente distinta (GTFS oficial de Sonda, no de los assets de GeoMB) -- no hay forma
-confiable de emparejar un stop de ahí con su pictograma de GeoMB. Metrobús usa en su lugar el
-logo de línea (icons/lineas/linea_N.png) como elemento gráfico, no un pictograma por estación.
+Los pictogramas de Metrobús (ic_est_<línea>_<n>) salen de data/metrobus_estaciones.json (ver
+sync_metrobus_estaciones.py), que a su vez viene de estaciones.json de GeoMB -- ESE archivo
+(no lineas.json, que no trae el campo "icono") es la fuente real, con nombre/posición/icono
+explícitos por estación; no hace falta adivinar ni emparejar contra el stops.json del GTFS
+oficial de Sonda que ya usa este mapa (son dos cosas separadas: ese sigue sirviendo para las
+rutas trazadas con datos de Sonda en vivo).
 
 Uso:
     python3 tools/sync_iconos_geomb.py [ruta_al_checkout_de_GeoMB]
 
 Si no se pasa ruta, usa la variable de entorno GEOMB_REPO o, en su defecto, "../GeoMB"
 relativo a este repo. Volver a correr este script si cambian esos drawables en GeoMB, o si
-data/mexibus_mapa.json (sync_mexibus_mapa.py) empieza a referenciar pictogramas nuevos.
+data/mexibus_mapa.json / data/metrobus_estaciones.json empiezan a referenciar pictogramas
+nuevos (corre antes sync_mexibus_mapa.py y sync_metrobus_estaciones.py para regenerarlos).
 """
 import json
 import os
@@ -53,11 +55,16 @@ def main():
             shutil.copy(origen, os.path.join(destino_lineas, f"linea_{n}.png"))
             n_lineas += 1
 
-    # Pictogramas de estación de Mexibús/Mexicable -- solo los que data/mexibus_mapa.json
-    # realmente referencia (evita copiar los ~349 que existen en GeoMB sin usarse aquí).
-    mapa_path = os.path.join(APP_DIR, "data", "mexibus_mapa.json")
+    # Pictogramas de estación -- solo los que data/mexibus_mapa.json y
+    # data/metrobus_estaciones.json REALMENTE referencian (evita copiar los ~700 que existen
+    # en GeoMB entre los 3 sistemas sin usarse todos aquí).
     n_est = 0
-    if os.path.exists(mapa_path):
+    for nombre_json in ("mexibus_mapa.json", "metrobus_estaciones.json"):
+        mapa_path = os.path.join(APP_DIR, "data", nombre_json)
+        if not os.path.exists(mapa_path):
+            print(f"[!] No existe {mapa_path} -- corre sync_mexibus_mapa.py / "
+                  f"sync_metrobus_estaciones.py primero para saber qué pictogramas copiar.")
+            continue
         with open(mapa_path, encoding="utf-8") as f:
             mapa = json.load(f)
         iconos = {e["icono"] for l in mapa.get("lineas", []) for e in l.get("estaciones", [])
@@ -71,9 +78,7 @@ def main():
             else:
                 faltantes.append(icono)
         if faltantes:
-            print(f"[!] {len(faltantes)} pictogramas referenciados sin archivo en GeoMB: {faltantes[:10]}")
-    else:
-        print(f"[!] No existe {mapa_path} -- corre sync_mexibus_mapa.py primero para saber qué pictogramas copiar.")
+            print(f"[!] {nombre_json}: {len(faltantes)} pictogramas sin archivo en GeoMB: {faltantes[:10]}")
 
     print(f"OK: logo app, {n_lineas} logos de línea, {n_est} pictogramas de estación -> {APP_DIR}/icons/")
 

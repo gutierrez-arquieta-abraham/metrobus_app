@@ -194,6 +194,7 @@ const LINE_COLORS = {
 
 let routesData = [], stopsData = [], vehiclesData = [], empresaMap = {};
 let mexibusLineas = [];   // Mexibús (101-104/111-113) + Mexicable (201-202), ver data/mexibus_mapa.json
+let metrobusLineas = [];  // Metrobús 1-7 CON pictograma real, ver data/metrobus_estaciones.json
 let map, stopsLayer, routesLayer, vehicleMarkers = {}, vehicleInfoWindow;
 let mexibusLayer, mexicableLayer;
 let selectedLine = null, selectedEco = null;
@@ -202,9 +203,10 @@ const sistemasActivos = {metrobus:true, mexibus:true, mexicable:true};
 const routeById = {};
 
 async function loadData(){
-  const [routesRes, stopsRes, vehiclesRes, mexibusRes] = await Promise.all([
+  const [routesRes, stopsRes, vehiclesRes, mexibusRes, metrobusEstRes] = await Promise.all([
     fetch('data/routes.json'), fetch('data/stops.json'), fetch('data/vehicles.json'),
-    fetch('data/mexibus_mapa.json').catch(()=>null)
+    fetch('data/mexibus_mapa.json').catch(()=>null),
+    fetch('data/metrobus_estaciones.json').catch(()=>null),
   ]);
   routesData = await routesRes.json();
   stopsData = await stopsRes.json();
@@ -212,6 +214,8 @@ async function loadData(){
   routesData.forEach(r => routeById[r.route_id] = r);
   try { mexibusLineas = mexibusRes && mexibusRes.ok ? (await mexibusRes.json()).lineas : []; }
   catch(e) { mexibusLineas = []; }   // sin este archivo, el mapa sigue funcionando solo con Metrobús
+  try { metrobusLineas = metrobusEstRes && metrobusEstRes.ok ? (await metrobusEstRes.json()).lineas : []; }
+  catch(e) { metrobusLineas = []; }  // sin este archivo, drawStops() cae a los puntos blancos genéricos
 
   // Optional empresas CSV — silently ignored if missing
   try {
@@ -304,8 +308,25 @@ function drawRoutes(){
   });
 }
 
+// Pictograma real de GeoMB (icons/estaciones/, ver tools/sync_metrobus_estaciones.py) cuando hay
+// datos sincronizados; si no, cae a los puntos blancos genéricos de siempre (data/stops.json,
+// del GTFS oficial de Sonda -- sin pictograma, pero siempre disponibles).
 function drawStops(){
   capaVacia(stopsLayer);
+  if (metrobusLineas.length) {
+    metrobusLineas.forEach(l => {
+      (l.estaciones || []).forEach(e => {
+        const icon = e.icono
+          ? {url:`icons/estaciones/${e.icono}.png`, scaledSize:new google.maps.Size(20,20)}
+          : {path:google.maps.SymbolPath.CIRCLE, scale:3, fillColor:'#ffffff', fillOpacity:0.8,
+             strokeColor:'#ffffff', strokeWeight:1, strokeOpacity:0.6};
+        stopsLayer.push(new google.maps.Marker({
+          position:{lat:e.lat, lng:e.lon}, map, title:`${e.nombre} (Línea ${l.numero})`, icon,
+        }));
+      });
+    });
+    return;
+  }
   stopsData.forEach(s => {
     stopsLayer.push(new google.maps.Marker({
       position:{lat:s.lat, lng:s.lon}, map, title:s.name,
