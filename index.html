@@ -120,6 +120,11 @@
   .gm-style .gm-style-iw-tc::after{background:var(--panel2) !important;}
   .gm-style .gm-style-iw-d{color:var(--text);}
   .gm-ui-hover-effect > span{background-color:var(--text) !important;}
+  /* Google fuerza overflow:scroll en el contenido aunque nunca haga falta (el texto del popup
+     siempre cabe, confirmado: scrollHeight==clientHeight) -- cada navegador reserva/pinta esa
+     barra de desplazamiento distinto (en Safari se ve clara, sin que el tema oscuro la alcance).
+     Mejor quitar la necesidad de que exista en vez de perseguir su estilo entre navegadores. */
+  .gm-style .gm-style-iw-d{overflow:hidden !important;}
 </style>
 </head>
 <body>
