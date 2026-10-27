@@ -607,10 +607,11 @@ window.gm_authFailure = function(){
     'No se pudo cargar Google Maps (key/dominio no autorizado). Revisa la consola.';
 };
 </script>
-<!-- Misma API key que usa la app Android (com.google.android.geo.API_KEY en AndroidManifest.xml),
+<!-- Key PROPIA del mapa web (separada de la de la app Android, com.google.android.geo.API_KEY en
+     AndroidManifest.xml: esa quedó restringida a Apps para Android/SHA-1 y ya no sirve aquí),
      restringida por referrer a este dominio en Google Cloud Console -- no es secreta: las keys de
      Maps JavaScript API se exponen al cliente por diseño, la protección es la restricción de
      dominio, no el secreto de la key (ver gm_authFailure arriba para cuando esa restricción falla). -->
-<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBVWqLHPP_BgAX0y1qewGY98-zk00McoSo&callback=iniciarMapa&loading=async" async></script>
+<script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyBYuJ0JQtmOvb-9GyzsaoGQpIxrbIer1IA&callback=iniciarMapa&loading=async" async></script>
 </body>
 </html>
