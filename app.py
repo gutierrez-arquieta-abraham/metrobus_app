@@ -125,11 +125,15 @@ except Exception as _e:
     print(f'[tts] blueprint no cargado: {_e}', flush=True)
 
 # Panel admin para mandar afectaciones A MANO: GET/POST /admin/afectacion (form web mobile).
-# Protegido por ADMIN_TOKEN; empuja por FCM al topic "afectaciones". Requiere admin_afect.py.
+# Protegido por mTLS (certificado cliente), con ADMIN_TOKEN como respaldo -- ver admin_afect.py.
+# Se importa el MÓDULO completo (no solo el blueprint): admin_notificar_actualizacion() reusa
+# su _token_ok() para aceptar el MISMO certificado cliente ahí, en vez de duplicar el criterio.
 try:
-    from admin_afect import admin_afect_bp
-    app.register_blueprint(admin_afect_bp)
+    import admin_afect
+    app.register_blueprint(admin_afect.admin_afect_bp)
+    _ADMIN_AFECT_DISPONIBLE = True
 except Exception as _e:
+    _ADMIN_AFECT_DISPONIBLE = False
     print(f'[admin_afect] blueprint no cargado: {_e}', flush=True)
 
 # Política de privacidad + eliminación de cuenta: GET /privacy, GET/POST /delete-account(/confirmar),
@@ -498,9 +502,15 @@ def admin_set_rt_url():
 
 @app.route('/admin/notificar_actualizacion', methods=['POST'])
 def admin_notificar_actualizacion():
-    """Dispara manualmente el aviso 'actualización disponible' (protegido por ADMIN_TOKEN)."""
-    token = os.environ.get('ADMIN_TOKEN', '')
-    if not token or request.headers.get('X-Admin-Token', '') != token:
+    """Dispara manualmente el aviso 'actualización disponible' (mismo topic "actualizaciones"
+    que usa revisar_actualizacion() al subir versión). Acepta el MISMO certificado cliente
+    (mTLS, vía :8443) que /admin/afectacion -- reusa admin_afect._token_ok() en vez de duplicar
+    ese criterio; si admin_afect no cargó (ver arriba), cae de vuelta al ADMIN_TOKEN de siempre."""
+    autorizado = _ADMIN_AFECT_DISPONIBLE and admin_afect._token_ok()
+    if not autorizado:
+        token = os.environ.get('ADMIN_TOKEN', '')
+        autorizado = bool(token) and request.headers.get('X-Admin-Token', '') == token
+    if not autorizado:
         return {'ok': False, 'error': 'token invalido'}, 403
     data = request.get_json(silent=True) or {}
     enviar_actualizacion(data.get('titulo', 'Actualización disponible'),
