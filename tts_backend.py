@@ -51,12 +51,14 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 _polly = None
 
-# ID del modelo clonado de "Ximena" (Loquendo) en Fish Audio -- voz pública de su catálogo
-# comunitario (fish.audio/m/70b29153e8ac4e5895ce44ae2b691330), no un producto oficial de
-# Nuance/Microsoft (Loquendo ya no se vende como tal). Solo se mapean aquí las voces que
-# realmente corren por Fish Audio; cualquier otro valor de "voz" sigue yendo por Polly.
+# ID del modelo de "Ximena" en Fish Audio. Clonado del anuncio REAL del Metrobús CDMX (locución
+# original de abordo, no una voz genérica tipo Loquendo) a partir de un clip limpio de la
+# grabación "Antiguo Anuncio Metrobús CDMX Línea 1" que proporcionó el usuario -- modelo propio
+# (visibility=private), creado vía POST /model, no un modelo público del catálogo. Solo se
+# mapean aquí las voces que realmente corren por Fish Audio; cualquier otro valor de "voz" sigue
+# yendo por Polly.
 FISH_AUDIO_VOICES = {
-    "Ximena": "70b29153e8ac4e5895ce44ae2b691330",
+    "Ximena": "883dfc99945b47bd83efaaa87f99925b",
 }
 
 
@@ -93,11 +95,15 @@ def tts():
     if len(texto) > 800:
         texto = texto[:800]
 
-    key = hashlib.sha256((voz + "|" + texto).encode("utf-8")).hexdigest()
+    # La clave incluye el ID del modelo de Fish Audio (no solo "voz"): así, si alguna vez se
+    # cambia el reference_id de una voz (como pasó con Ximena, de un clon genérico al anuncio
+    # real del Metrobús), la caché vieja queda automáticamente huérfana -- nunca sirve audio de
+    # un modelo distinto al que está configurado ahora, sin tener que purgar el directorio a mano.
+    fish_model = FISH_AUDIO_VOICES.get(voz)
+    key = hashlib.sha256((voz + "|" + (fish_model or "") + "|" + texto).encode("utf-8")).hexdigest()
     path = os.path.join(CACHE_DIR, key + ".mp3")
 
     if not os.path.exists(path) or os.path.getsize(path) == 0:
-        fish_model = FISH_AUDIO_VOICES.get(voz)
         try:
             audio = (_sintetizar_fish_audio(texto, fish_model) if fish_model
                       else _sintetizar_polly(texto, voz))
