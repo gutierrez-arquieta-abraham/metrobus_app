@@ -147,6 +147,17 @@ except Exception as _e:
     _ADMIN_TRAZOS_DISPONIBLE = False
     print(f'[admin_trazos] blueprint no cargado: {_e}', flush=True)
 
+# Versión mínima requerida (actualización obligatoria): GET /admin/version, POST
+# /admin/version/guardar -- ver admin_version.py. GET /data/version.json y el
+# 'before_request' de abajo (gate_version_minima) lo usan para bloquear clientes atrasados.
+try:
+    import admin_version
+    app.register_blueprint(admin_version.admin_version_bp)
+    _ADMIN_VERSION_DISPONIBLE = True
+except Exception as _e:
+    _ADMIN_VERSION_DISPONIBLE = False
+    print(f'[admin_version] blueprint no cargado: {_e}', flush=True)
+
 # Política de privacidad + eliminación de cuenta: GET /privacy, GET/POST /delete-account(/confirmar),
 # POST /api/account/delete. Requiere account_deletion.py + firebase-admin (ya es dependencia del push).
 # Se importa el MÓDULO completo (no solo account_bp): device_registrar_token() de abajo reusa su
@@ -158,6 +169,33 @@ try:
 except Exception as _e:
     _ACCOUNT_DISPONIBLE = False
     print(f'[account] blueprint no cargado: {_e}', flush=True)
+
+
+# Rechaza (426 Upgrade Required) las llamadas de una app MÁS VIEJA que la versión mínima vigente
+# (ver admin_version.py) -- cinturón y tirantes junto con el bloqueo que hace la propia app al
+# arrancar (ActualizacionObligatoria en GeoMB), por si alguien manipula el APK para saltárselo.
+# Solo mira peticiones que traen el header X-App-Version: así NUNCA afecta al mapa web
+# (index.html/navegador) ni a webhooks de terceros (Didit, etc.), que no lo mandan. /admin/* se
+# excluye SIEMPRE (el panel es para el staff, nunca para el cliente Android, pase lo que pase en
+# ese header) y /data/version.json también -- la app necesita poder leer ESE endpoint SIEMPRE
+# para enterarse de por qué la bloquearon.
+@app.before_request
+def gate_version_minima():
+    if (not _ADMIN_VERSION_DISPONIBLE or request.path == '/data/version.json'
+            or request.path.startswith('/admin/')):
+        return None
+    version = request.headers.get('X-App-Version', '').strip()
+    if not version:
+        return None
+    try:
+        actual = int(version)
+    except ValueError:
+        return None
+    minima = admin_version.minima_vigente()
+    if minima > 0 and actual < minima:
+        return Response(json.dumps({'error': 'actualizacion_requerida', 'minima': minima, 'actual': actual},
+                                    ensure_ascii=False), status=426, mimetype='application/json')
+    return None
 
 
 def log(msg):
@@ -475,6 +513,17 @@ def rutas_temporales():
        aquí también (mismo criterio que /admin/afectacion con admin_afect._token_ok())."""
     vigentes = admin_trazos.cargar_patches_vigentes() if _ADMIN_TRAZOS_DISPONIBLE else []
     return Response(json.dumps({'actualizado': int(time.time()), 'rutas': vigentes}, ensure_ascii=False),
+                    mimetype='application/json', headers={'Cache-Control': 'no-store'})
+
+
+@app.route('/data/version.json')
+def version_minima():
+    """versionCode mínimo vigente (ver admin_version.py) -- la app lo consulta al arrancar
+       (ActualizacionObligatoria en GeoMB) para autobloquearse si está atrasada. Exento a
+       propósito del gate_version_minima de arriba: la app debe poder leer esto SIEMPRE,
+       incluso ya bloqueada, para saber por qué."""
+    minima = admin_version.minima_vigente() if _ADMIN_VERSION_DISPONIBLE else 0
+    return Response(json.dumps({'minima': minima}, ensure_ascii=False),
                     mimetype='application/json', headers={'Cache-Control': 'no-store'})
 
 
