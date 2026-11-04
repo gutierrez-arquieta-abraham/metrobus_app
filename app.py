@@ -136,6 +136,17 @@ except Exception as _e:
     _ADMIN_AFECT_DISPONIBLE = False
     print(f'[admin_afect] blueprint no cargado: {_e}', flush=True)
 
+# Editor de trazos temporales (desvíos/servicios de apoyo con mapa): GET /admin/trazos,
+# POST /admin/trazos/guardar. Mismo mTLS que /admin/afectacion -- ver admin_trazos.py.
+# /data/rutas_temporales.json (abajo) sirve lo que guarda este panel.
+try:
+    import admin_trazos
+    app.register_blueprint(admin_trazos.admin_trazos_bp)
+    _ADMIN_TRAZOS_DISPONIBLE = True
+except Exception as _e:
+    _ADMIN_TRAZOS_DISPONIBLE = False
+    print(f'[admin_trazos] blueprint no cargado: {_e}', flush=True)
+
 # Política de privacidad + eliminación de cuenta: GET /privacy, GET/POST /delete-account(/confirmar),
 # POST /api/account/delete. Requiere account_deletion.py + firebase-admin (ya es dependencia del push).
 # Se importa el MÓDULO completo (no solo account_bp): device_registrar_token() de abajo reusa su
@@ -453,6 +464,17 @@ def afectaciones_mxb():
     salida = {'actualizado': int(ahora),
               'afectaciones': sorted(combinado.values(), key=lambda x: x.get('linea', 0))}
     return Response(json.dumps(salida, ensure_ascii=False),
+                    mimetype='application/json', headers={'Cache-Control': 'no-store'})
+
+
+@app.route('/data/rutas_temporales.json')
+def rutas_temporales():
+    """Parches de ruta temporales (desvíos/servicios de apoyo) vigentes, escritos a mano desde
+       /admin/trazos -- ver admin_trazos.py. GeoMB los fusiona en tiempo de ejecución, sin
+       recompilar. Reusa admin_trazos.cargar_patches_vigentes() en vez de leer el archivo
+       aquí también (mismo criterio que /admin/afectacion con admin_afect._token_ok())."""
+    vigentes = admin_trazos.cargar_patches_vigentes() if _ADMIN_TRAZOS_DISPONIBLE else []
+    return Response(json.dumps({'actualizado': int(time.time()), 'rutas': vigentes}, ensure_ascii=False),
                     mimetype='application/json', headers={'Cache-Control': 'no-store'})
 
 
