@@ -8,7 +8,8 @@
 # Pruebas de /api/tts (ver tts_backend.py): que "voz=Ximena" (y solo esa, por ahora) vaya
 # por Fish Audio y cualquier otro valor (incluido el default "Mia") siga yendo por Polly, que
 # la caché en disco evite repetir la llamada externa, y que un error de cualquiera de los dos
-# motores responda 502 en vez de tronar. Usa un directorio de caché TEMPORAL propio (nunca
+# motores responda 502 en vez de tronar; y POST /api/tts/paquete (zip de varias frases desde la
+# misma caché, con pendientes si se acaba el tiempo de síntesis). Usa un directorio de caché TEMPORAL propio (nunca
 # tts_cache/ real) y mockea boto3/requests -- no pega contra AWS ni Fish Audio de verdad.
 #
 # Ejecutar:  python3 -m unittest test_tts_backend -v
@@ -117,6 +118,67 @@ class TtsBackendTest(unittest.TestCase):
     def test_sinTexto_responde400(self):
         r = self.client.get("/api/tts")
         self.assertEqual(400, r.status_code)
+
+    # --- POST /api/tts/paquete -------------------------------------------------------------
+
+    def _zip(self, r):
+        import io, json, zipfile
+        z = zipfile.ZipFile(io.BytesIO(r.data))
+        return z, json.loads(z.read("manifest.json"))
+
+    @patch("tts_backend._cliente_polly")
+    def test_paquete_devuelveZipConCadaTextoPorIndice(self, cliente_polly):
+        polly = MagicMock()
+        polly.synthesize_speech.side_effect = lambda **kw: {"AudioStream": MagicMock(read=lambda: kw["Text"].encode())}
+        cliente_polly.return_value = polly
+
+        r = self.client.post("/api/tts/paquete", json={"voz": "Mia", "textos": ["Uno", "Dos", ""]})
+
+        self.assertEqual(200, r.status_code)
+        self.assertEqual("application/zip", r.mimetype)
+        z, m = self._zip(r)
+        self.assertEqual([0, 1], m["ok"])
+        self.assertEqual([2], m["fallidos"])
+        self.assertEqual(b"Uno", z.read("0000.mp3"))
+        self.assertEqual(b"Dos", z.read("0001.mp3"))
+
+    @patch("tts_backend._cliente_polly")
+    def test_paquete_usaLaMismaCacheQueGet_sinVolverASintetizar(self, cliente_polly):
+        polly = MagicMock()
+        polly.synthesize_speech.return_value = {"AudioStream": MagicMock(read=lambda: b"AUDIO")}
+        cliente_polly.return_value = polly
+
+        self.client.get("/api/tts?texto=Hola")                                   # 1 síntesis
+        r = self.client.post("/api/tts/paquete", json={"textos": ["Hola"]})     # sale de caché
+
+        self.assertEqual(1, polly.synthesize_speech.call_count)
+        z, m = self._zip(r)
+        self.assertEqual([0], m["ok"])
+
+    @patch("tts_backend._cliente_polly")
+    def test_paquete_sinTiempoParaSintetizar_dejaPendientes(self, cliente_polly):
+        polly = MagicMock()
+        polly.synthesize_speech.return_value = {"AudioStream": MagicMock(read=lambda: b"AUDIO")}
+        cliente_polly.return_value = polly
+        with patch.object(tts_backend, "PAQUETE_SEG_SINTESIS", -1):
+            r = self.client.post("/api/tts/paquete", json={"textos": ["A", "B"]})
+        z, m = self._zip(r)
+        self.assertEqual([], m["ok"])
+        self.assertEqual([0, 1], m["pendientes"])
+        polly.synthesize_speech.assert_not_called()
+
+    def test_paquete_errorDelMotor_marcaFallido_noTruena(self):
+        with patch("tts_backend._cliente_polly", side_effect=RuntimeError("AWS caído")):
+            r = self.client.post("/api/tts/paquete", json={"textos": ["Hola"]})
+        self.assertEqual(200, r.status_code)
+        z, m = self._zip(r)
+        self.assertEqual([0], m["fallidos"])
+
+    def test_paquete_sinTextos_400_yDemasiados_413(self):
+        self.assertEqual(400, self.client.post("/api/tts/paquete", json={"textos": []}).status_code)
+        with patch.object(tts_backend, "PAQUETE_MAX_TEXTOS", 2):
+            r = self.client.post("/api/tts/paquete", json={"textos": ["a", "b", "c"]})
+        self.assertEqual(413, r.status_code)
 
 
 if __name__ == "__main__":
