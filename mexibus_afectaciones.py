@@ -67,6 +67,14 @@ def _int_env(nombre, defecto):
 AFECT_SOURCE     = os.getenv("AFECT_SOURCE", "rss").lower()
 # RSS (p. ej. RSS.app de la cuenta de X/FB de SITRAMYTEM):
 RSS_URL          = os.getenv("RSS_URL", "")
+# Línea por defecto de cada feed en RSS_URL (mismo orden, separado por comas; vacío = sin
+# default, el texto decide). Las cuentas/páginas POR LÍNEA (@MexibusL2, @Mexibuslll, @MexiBus_4,
+# "Alerta de Tránsito Mexibús L1 Page") casi nunca repiten "Mexibús"/"línea N" en sus posts —el
+# canal mismo YA ES la confirmación de esa línea— así que sin este default esos posts se
+# descartaban en silencio (nunca pasaban el filtro de palabras clave de parse_post). Los feeds
+# GENÉRICOS (MexibusInforma, Mexicable: cubren varias líneas) se dejan vacíos aquí a propósito,
+# para seguir detectando la línea solo por el texto.
+RSS_URL_LINEAS   = os.getenv("RSS_URL_LINEAS", "")
 # X (Twitter) API v2:
 X_BEARER         = os.getenv("X_BEARER", "")
 X_USER           = os.getenv("X_USER", "sitramytem")
@@ -126,6 +134,8 @@ LINEA_COD = [
     (_pat(3),                                                 103, "L3"),
     (_pat(4),                                                 104, "L4"),
 ]
+# código -> etiqueta (para el default por feed de RSS_URL_LINEAS, cuando el texto no la trae).
+_ETIQUETAS_COD = {cod: lab for _, cod, lab in LINEA_COD}
 
 def lineas_en_texto(tn: str):
     enc = {}
@@ -148,7 +158,7 @@ def lineas_en_texto(tn: str):
 
 # ----------------------------------------------------------------- estado (razón general)
 def estado_de(tn: str) -> str:
-    if re.search(r"restablec|reanud|normaliz|opera con normalidad", tn):
+    if re.search(r"restablec|reanud|normaliz|opera con normalidad|se libera el paso|libera la circulacion|circulacion liberada", tn):
         return "Servicio restablecido"
     if re.search(r"realiza circuito|se realiza circuito|\bcircuito\b", tn):
         return "Servicio parcial"   # el circuito manda sobre 'suspende': la línea corre parcial
@@ -213,14 +223,19 @@ def segmentos_circuito(texto: str):
     return segs
 
 # --------------------------------------------------------------------- parser de un post
-def parse_post(texto: str):
+def parse_post(texto: str, linea_feed=None):
+    """linea_feed: código de línea por defecto del feed de origen (ver RSS_URL_LINEAS), o None
+    para feeds genéricos. Con default, un post sin ninguna mención textual de Mexibús/línea
+    (normal en las cuentas por línea) NO se descarta: se asume esa línea."""
     tn = _norm(texto)
-    if not any(k in tn for k in ("mexibus", "mexicable", "aifa", "afia",
-                                 "servicio electrico", "servicioelectrico")):
+    if linea_feed is None and not any(k in tn for k in ("mexibus", "mexicable", "aifa", "afia",
+                                                         "servicio electrico", "servicioelectrico")):
         return []
     lineas = lineas_en_texto(tn)
     if not lineas:
-        return []
+        if linea_feed is None:
+            return []
+        lineas = {linea_feed: _ETIQUETAS_COD.get(linea_feed, "L" + str(linea_feed))}
     estado = estado_de(tn)
     lugar  = lugar_de(texto)
     info   = info_de(texto)
@@ -244,8 +259,14 @@ def fetch_posts_rss():
     urls = [u.strip() for u in RSS_URL.split(",") if u.strip()]
     if not urls:
         raise RuntimeError("Falta RSS_URL")
+    # Línea por defecto de cada feed, por POSICIÓN (mismo orden que RSS_URL); "" o falta = None.
+    lineas_raw = RSS_URL_LINEAS.split(",")
+    lineas_feed = []
+    for i in range(len(urls)):
+        v = lineas_raw[i].strip() if i < len(lineas_raw) else ""
+        lineas_feed.append(int(v) if v else None)
     out = []
-    for url in urls:
+    for url, linea_feed in zip(urls, lineas_feed):
         try:
             r = requests.get(url, timeout=20); r.raise_for_status()
             root = ET.fromstring(r.content)
@@ -274,7 +295,7 @@ def fetch_posts_rss():
             if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
             # id estable = guid o link (evita reprocesar el mismo post entre feeds/rondas)
             out.append({"id": item.findtext("guid") or item.findtext("link") or titulo,
-                        "message": texto, "created_time": dt})
+                        "message": texto, "created_time": dt, "linea_feed": linea_feed})
     return out
 
 # --- X (Twitter) API v2 ------------------------------------------------------------------
@@ -403,7 +424,7 @@ def computar_estado(posts):
         # tope duro: nunca pasado las 23:59 (CDMX) del día en que se publicó
         if ahora.timestamp() > _fin_del_dia_local(post["created_time"].timestamp()):
             continue
-        for a in parse_post(post["message"]):
+        for a in parse_post(post["message"], post.get("linea_feed")):
             reciente.setdefault(a["linea"], a)   # el primero (más reciente) por línea gana
     out = []
     for ln, a in reciente.items():
@@ -443,7 +464,7 @@ def procesar_una_vez():
     for post in sorted(posts, key=lambda p: p["created_time"]):
         if (ahora - post["created_time"]).total_seconds() / 60 > MAX_POST_AGE_MIN:
             continue
-        for a in parse_post(post["message"]):
+        for a in parse_post(post["message"], post.get("linea_feed")):
             # Dedup POR PUBLICACIÓN + línea: cada post se empuja UNA sola vez (incl. "restablecido").
             k = str(post.get("id")) + "|" + a["linea"]
             if k in vistos:
