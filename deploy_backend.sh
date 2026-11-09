@@ -36,7 +36,10 @@ ssh -i "$KEY" "$HOST" "sudo sed -i 's/^MXB_ESTADO_TTL=.*/MXB_ESTADO_TTL=${TTL_MI
 echo ">> 3/5  Subiendo archivos (con respaldo) ..."
 ssh -i "$KEY" "$HOST" "cp ${WEBDIR}/app.py ${WEBDIR}/app.py.bak.${TS}; cp /home/ubuntu/push_metrobus.py /home/ubuntu/push_metrobus.py.bak.${TS}; sudo cp ${FEEDDIR}/mexibus_afectaciones.py ${FEEDDIR}/mexibus_afectaciones.py.bak.${TS}"
 # Web (metrobus_app): app.py + admin_afect.py + push_metrobus.py (este ultimo por el _push del panel)
-scp -i "$KEY" app.py admin_afect.py push_metrobus.py "$HOST:${WEBDIR}/"
+# + admin_trazos.py + admin_version.py + tts_backend.py: antes NUNCA se subian con este script --
+# admin_trazos/admin_version llegaron a master sin desplegarse nunca, y tts_backend.py se quedo
+# fuera del deploy versionado (se noto al investigar por que Polly facturaba cada mes).
+scp -i "$KEY" app.py admin_afect.py push_metrobus.py admin_trazos.py admin_version.py tts_backend.py "$HOST:${WEBDIR}/"
 # Scraper (metrobus-push, /home/ubuntu): push_metrobus.py (escribe el estado Metrobus)
 scp -i "$KEY" push_metrobus.py "$HOST:/home/ubuntu/push_metrobus.py"
 # Feed Mexibus (/opt/geomb-afect): via /tmp + sudo
