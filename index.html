@@ -67,13 +67,17 @@
   .sys-row{display:flex;gap:6px;}
   .sys-row .chip{flex:1;text-align:center;}
 
-  /* Botón flotante de afectaciones + su panel. z-index por encima de los controles propios del
+  /* Botones flotantes (satélite + afectaciones): un wrapper con flex en vez de posicionar cada
+     uno a mano -- así no hay que calcular el ancho del de al lado (el texto de "Afectaciones"
+     cambia de ancho según el idioma/estado). z-index por encima de los controles propios del
      mapa (zoom +/-, etc.) para que no quede tapado. */
-  #afectBtn{
-    position:absolute; top:12px; right:12px; z-index:1100; background:var(--panel);
-    color:var(--text); border:1px solid var(--border); border-radius:999px; padding:8px 14px;
-    font-size:12px; font-weight:600; cursor:pointer; box-shadow:0 2px 8px rgba(0,0,0,.4);
+  #topRightControls{position:absolute; top:12px; right:12px; z-index:1100; display:flex; gap:8px;}
+  #satelliteBtn, #afectBtn{
+    background:var(--panel); color:var(--text); border:1px solid var(--border);
+    border-radius:999px; padding:8px 14px; font-size:12px; font-weight:600; cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,.4); white-space:nowrap;
   }
+  #satelliteBtn.activo{border-color:var(--accent); color:var(--accent);}
   #afectBtn.alerta{border-color:var(--accent); color:var(--accent);}
   #afectPanel{
     position:absolute; top:52px; right:12px; z-index:1100; width:300px; max-height:70vh;
@@ -129,7 +133,10 @@
 </head>
 <body>
 <button id="menuBtn" onclick="document.getElementById('sidebar').classList.toggle('open')">☰</button>
-<button id="afectBtn" onclick="toggleAfectPanel()">⚠ Afectaciones</button>
+<div id="topRightControls">
+  <button id="satelliteBtn" onclick="toggleSatellite()">🛰 Satélite</button>
+  <button id="afectBtn" onclick="toggleAfectPanel()">⚠ Afectaciones</button>
+</div>
 <div id="afectPanel"></div>
 <div id="app">
   <div id="sidebar">
@@ -306,6 +313,18 @@ function initMap(){
   // puede crear a nivel de módulo: `google.maps` no existe hasta que el script de Maps carga.
   vehicleInfoWindow = new google.maps.InfoWindow();
   map.addListener('zoom_changed', actualizarVisibilidadEstaciones);
+}
+
+// Satélite = HYBRID (imagen + calles/nombres encima), no SATELLITE a secas -- sin eso se pierden
+// los nombres de calle, que es justo lo que ayuda a ubicarse. 'styles' (DARK_MAP_STYLE) solo
+// aplica en ROADMAP; Google lo ignora en los demás tipos, así que no hace falta quitarlo/ponerlo.
+// Bandera propia (en vez de leer map.getMapTypeId()): no depende de cómo Maps reporte su estado
+// interno, que puede tardar en reflejar el tipo recién puesto.
+let satelliteActivo = false;
+function toggleSatellite(){
+  satelliteActivo = !satelliteActivo;
+  map.setMapTypeId(satelliteActivo ? google.maps.MapTypeId.HYBRID : google.maps.MapTypeId.ROADMAP);
+  document.getElementById('satelliteBtn').classList.toggle('activo', satelliteActivo);
 }
 
 // Solo las capas de ESTACIONES (pictogramas); las de rutas (routesLayer/mexibus.../mexicable...
