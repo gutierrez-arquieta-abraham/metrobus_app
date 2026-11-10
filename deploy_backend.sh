@@ -27,6 +27,10 @@ ssh -i "$KEY" "$HOST" '
   GE=/home/ubuntu/geomb.env
   grep -q "^GOOGLE_APPLICATION_CREDENTIALS=" $GE || echo "GOOGLE_APPLICATION_CREDENTIALS=/home/ubuntu/firebase.json" >> $GE
   grep -q "^ADMIN_TOKEN=" $GE || echo "ADMIN_TOKEN=$(openssl rand -hex 24)" >> $GE
+  # Caché PERMANENTE de voz (mp3 de Polly/Fish Audio): ruta fija, la misma de siempre. Nunca se borra.
+  grep -q "^TTS_CACHE=" $GE || echo "TTS_CACHE=/home/ubuntu/metrobus_app/tts_cache" >> $GE
+  mkdir -p /home/ubuntu/metrobus_app/tts_cache
+  echo "   audios en caché: $(ls /home/ubuntu/metrobus_app/tts_cache 2>/dev/null | grep -c "\.mp3$")"
   echo "   claves en geomb.env:"; grep -oE "^[A-Za-z_]+=" $GE | sort -u | sed "s/^/     /"
 '
 
@@ -39,6 +43,8 @@ ssh -i "$KEY" "$HOST" "cp ${WEBDIR}/app.py ${WEBDIR}/app.py.bak.${TS}; cp /home/
 # + admin_trazos.py + admin_version.py + tts_backend.py: antes NUNCA se subian con este script --
 # admin_trazos/admin_version llegaron a master sin desplegarse nunca, y tts_backend.py se quedo
 # fuera del deploy versionado (se noto al investigar por que Polly facturaba cada mes).
+# tts_backend.py = voz /api/tts y /api/tts/paquete; NO toca la caché tts_cache/.
+ssh -i "$KEY" "$HOST" "cp ${WEBDIR}/tts_backend.py ${WEBDIR}/tts_backend.py.bak.${TS} 2>/dev/null || true"
 scp -i "$KEY" app.py admin_afect.py push_metrobus.py admin_trazos.py admin_version.py tts_backend.py "$HOST:${WEBDIR}/"
 # Scraper (metrobus-push, /home/ubuntu): push_metrobus.py (escribe el estado Metrobus)
 scp -i "$KEY" push_metrobus.py "$HOST:/home/ubuntu/push_metrobus.py"
@@ -54,6 +60,7 @@ ssh -i "$KEY" "$HOST" "sudo systemctl restart metrobus-web.service metrobus-push
 
 echo ">> Verificacion:"
 curl -s -o /dev/null -w "     /admin/afectacion -> HTTP %{http_code}\n" "https://geomb.duckdns.org/admin/afectacion" || true
+curl -s -o /dev/null -w "     /api/tts/paquete -> HTTP %{http_code} (400 = vivo, sin textos)\n" -X POST -H "Content-Type: application/json" -d '{"textos":[]}' "https://geomb.duckdns.org/api/tts/paquete" || true
 echo "     panel actual:"; curl -s "https://geomb.duckdns.org/data/afectaciones_mexibus.json" | sed 's/^/       /'; echo
 echo ">> Tu ADMIN_TOKEN (para el celular):"
 ssh -i "$KEY" "$HOST" 'grep "^ADMIN_TOKEN=" /home/ubuntu/geomb.env | sed "s/^/     /"'
