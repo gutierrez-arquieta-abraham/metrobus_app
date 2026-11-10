@@ -53,8 +53,9 @@ Uso:   python mexibus_afectaciones.py --test         # prueba el parser (sin red
        python mexibus_afectaciones.py --serve        # levanta el webhook (o: uvicorn mexibus_afectaciones:app)
 """
 
-import os, re, json, time, unicodedata
+import os, re, json, time, unicodedata, enum
 from datetime import datetime, timezone
+from typing import NamedTuple, Optional
 
 def _int_env(nombre, defecto):
     """int() tolerante: ignora comentarios en línea/espacios (systemd no los limpia)."""
@@ -121,21 +122,68 @@ def _pat(n, ramal=False):
     return (r"(?:mexibus\s*" + _LW + r"\s*" + str(n) + suf
             + r"|\b" + _LW + r"\s*" + str(n) + suf + r")")
 
+# ------------------------------------------------------------------- LineaId (sistema+variante)
+# Encapsula la convención numérica de GeoMB (ver CLAUDE.md: Metrobús 1-7, Mexibús 10X
+# ordinario/11X ramal/12X exprés, Mexicable 20X) en UN solo lugar -- antes el entero "111",
+# "201", etc. se escribía a mano en cada tupla de LINEA_COD, repitiendo la aritmética. El
+# entero (.codigo) SIGUE siendo el único formato de cable (JSON/FCM/RSS_URL_LINEAS); esto es
+# solo la capa de lectura/escritura de ese entero -- nada cambia en el payload.
+class Sistema(enum.Enum):
+    METROBUS = "metrobus"
+    MEXIBUS = "mexibus"
+    MEXICABLE = "mexicable"
+
+class Variante(enum.Enum):
+    ORDINARIO = "ordinario"
+    RAMAL = "ramal"
+    EXPRES = "expres"
+
+class LineaId(NamedTuple):
+    sistema: Sistema
+    numero: int
+    variante: Variante = Variante.ORDINARIO
+
+    @property
+    def codigo(self) -> int:
+        if self.sistema is Sistema.METROBUS:
+            return self.numero
+        base = 100 if self.sistema is Sistema.MEXIBUS else 200
+        if self.variante is Variante.RAMAL:  base += 10
+        elif self.variante is Variante.EXPRES: base += 20
+        return base + self.numero
+
+    @property
+    def etiqueta(self) -> str:
+        if self.sistema is Sistema.MEXICABLE:
+            return f"MXC L{self.numero}"
+        suf = "A" if self.variante is Variante.RAMAL else (" Exprés" if self.variante is Variante.EXPRES else "")
+        return f"L{self.numero}{suf}"
+
+_L1A = LineaId(Sistema.MEXIBUS, 1, Variante.RAMAL)
+_L2A = LineaId(Sistema.MEXIBUS, 2, Variante.RAMAL)
+_L3A = LineaId(Sistema.MEXIBUS, 3, Variante.RAMAL)
+_MXB1, _MXB2, _MXB3, _MXB4 = (LineaId(Sistema.MEXIBUS, n) for n in (1, 2, 3, 4))
+_MXC1 = LineaId(Sistema.MEXICABLE, 1)
+_MXC2 = LineaId(Sistema.MEXICABLE, 2)
+
 LINEA_COD = [
-    (r"aifa|afia|aeropuerto|felipe angeles|terminal de pasajeros", 111, "L1A"),
-    (_pat(1, ramal=True),                                     111, "L1A"),
-    (r"servicio\s*electric\w*|servicioelectric\w*",          112, "L2A"),   # L2A = "Servicio Eléctrico" (tolera "electrici", etc.)
-    (_pat(2, ramal=True),                                     112, "L2A"),
-    (_pat(3, ramal=True),                                     113, "L3A"),   # (normalmente la etiquetan como L3)
-    (r"mexicable\s*" + _LW + r"\s*1|linea roja",             201, "MXC L1"),
-    (r"mexicable\s*" + _LW + r"\s*2",                        202, "MXC L2"),
-    (_pat(1),                                                 101, "L1"),
-    (_pat(2),                                                 102, "L2"),
-    (_pat(3),                                                 103, "L3"),
-    (_pat(4),                                                 104, "L4"),
+    (r"aifa|afia|aeropuerto|felipe angeles|terminal de pasajeros", _L1A.codigo, _L1A.etiqueta),
+    (_pat(1, ramal=True),                                     _L1A.codigo, _L1A.etiqueta),
+    (r"servicio\s*electric\w*|servicioelectric\w*",          _L2A.codigo, _L2A.etiqueta),   # L2A = "Servicio Eléctrico" (tolera "electrici", etc.)
+    (_pat(2, ramal=True),                                     _L2A.codigo, _L2A.etiqueta),
+    (_pat(3, ramal=True),                                     _L3A.codigo, _L3A.etiqueta),   # (normalmente la etiquetan como L3)
+    (r"mexicable\s*" + _LW + r"\s*1|linea roja",             _MXC1.codigo, _MXC1.etiqueta),
+    (r"mexicable\s*" + _LW + r"\s*2",                        _MXC2.codigo, _MXC2.etiqueta),
+    (_pat(1),                                                 _MXB1.codigo, _MXB1.etiqueta),
+    (_pat(2),                                                 _MXB2.codigo, _MXB2.etiqueta),
+    (_pat(3),                                                 _MXB3.codigo, _MXB3.etiqueta),
+    (_pat(4),                                                 _MXB4.codigo, _MXB4.etiqueta),
 ]
 # código -> etiqueta (para el default por feed de RSS_URL_LINEAS, cuando el texto no la trae).
 _ETIQUETAS_COD = {cod: lab for _, cod, lab in LINEA_COD}
+# etiqueta (normalizada, sin acentos/mayúsculas) -> código -- para poder escribir RSS_URL_LINEAS
+# con la etiqueta real ("L4", "3A", "MXC L1") en vez de tener que saber el entero interno.
+_COD_POR_ETIQUETA = {_norm(lab): cod for cod, lab in _ETIQUETAS_COD.items()}
 
 def lineas_en_texto(tn: str):
     enc = {}
@@ -251,6 +299,23 @@ def fetch_posts():
     if AFECT_SOURCE == "facebook": return fetch_posts_facebook()
     return fetch_posts_rss()       # por defecto: RSS
 
+def _resolver_linea_feed(v: str) -> Optional[int]:
+    """Entrada de RSS_URL_LINEAS -> código interno. Acepta el entero legacy ("104") O la
+    etiqueta real ("L4", "3A", "MXC L1", sin importar mayúsculas/acentos) -- no hay que saber
+    la convención numérica para configurar un feed nuevo."""
+    if not v:
+        return None
+    if v.isdigit():
+        return int(v)
+    v_norm = _norm(v)
+    if v_norm in _COD_POR_ETIQUETA:
+        return _COD_POR_ETIQUETA[v_norm]
+    # tolera "3a"/"l3a" sin espacio -> etiqueta real es "L3A"
+    v_norm2 = _norm("l" + v) if not v_norm.startswith("l") else v_norm
+    if v_norm2 in _COD_POR_ETIQUETA:
+        return _COD_POR_ETIQUETA[v_norm2]
+    raise ValueError(f"RSS_URL_LINEAS: etiqueta de línea desconocida {v!r}")
+
 # --- RSS (RSS.app u otro puente de la cuenta de X/FB) -------------------------------------
 def fetch_posts_rss():
     """Lee uno o VARIOS feeds RSS (RSS_URL separados por coma) y usa el título como texto."""
@@ -264,7 +329,7 @@ def fetch_posts_rss():
     lineas_feed = []
     for i in range(len(urls)):
         v = lineas_raw[i].strip() if i < len(lineas_raw) else ""
-        lineas_feed.append(int(v) if v else None)
+        lineas_feed.append(_resolver_linea_feed(v))
     out = []
     for url, linea_feed in zip(urls, lineas_feed):
         try:

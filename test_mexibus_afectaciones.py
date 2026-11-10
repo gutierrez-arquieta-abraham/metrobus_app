@@ -73,6 +73,34 @@ def test_feed_l1_facebook_liberado_es_restablecido():
     assert m.computar_estado(posts) == []
 
 
+def test_resolver_linea_feed_acepta_entero_legacy_y_etiqueta():
+    # RSS_URL_LINEAS acepta el entero interno (compat) o la etiqueta real -- no hay que saber
+    # la convención numérica (ver LineaId) para configurar un feed nuevo.
+    assert m._resolver_linea_feed("104") == 104
+    assert m._resolver_linea_feed("L4") == 104
+    assert m._resolver_linea_feed("l4") == 104
+    assert m._resolver_linea_feed("3A") == 113
+    assert m._resolver_linea_feed("MXC L1") == 201
+    assert m._resolver_linea_feed("") is None
+    try:
+        m._resolver_linea_feed("no-existe")
+        assert False, "debió lanzar ValueError"
+    except ValueError:
+        pass
+
+
+def test_lineaid_codigo_coincide_con_la_convencion_legacy():
+    # LineaId.codigo debe reproducir exactamente la convención de CLAUDE.md (Mexibús
+    # 10X ordinario/11X ramal/12X exprés, Mexicable 20X) para no romper el formato de cable.
+    assert m.LineaId(m.Sistema.MEXIBUS, 4).codigo == 104
+    assert m.LineaId(m.Sistema.MEXIBUS, 1, m.Variante.RAMAL).codigo == 111
+    assert m.LineaId(m.Sistema.MEXIBUS, 2, m.Variante.EXPRES).codigo == 122
+    assert m.LineaId(m.Sistema.MEXICABLE, 2).codigo == 202
+    assert m.LineaId(m.Sistema.MEXIBUS, 4).etiqueta == "L4"
+    assert m.LineaId(m.Sistema.MEXIBUS, 1, m.Variante.RAMAL).etiqueta == "L1A"
+    assert m.LineaId(m.Sistema.MEXICABLE, 1).etiqueta == "MXC L1"
+
+
 def test_linea_explicita_en_texto_gana_sobre_el_default_del_feed():
     # Si el propio texto YA menciona otra línea, esa manda (el default del feed es solo respaldo).
     r = m.parse_post("Afectación en Mexibús línea 2 por agua en la vía", linea_feed=104)
