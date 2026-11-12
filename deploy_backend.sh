@@ -45,9 +45,15 @@ ssh -i "$KEY" "$HOST" "cp ${WEBDIR}/app.py ${WEBDIR}/app.py.bak.${TS}; cp /home/
 # fuera del deploy versionado (se noto al investigar por que Polly facturaba cada mes).
 # tts_backend.py = voz /api/tts y /api/tts/paquete; NO toca la caché tts_cache/.
 ssh -i "$KEY" "$HOST" "cp ${WEBDIR}/tts_backend.py ${WEBDIR}/tts_backend.py.bak.${TS} 2>/dev/null || true"
-scp -i "$KEY" app.py admin_afect.py push_metrobus.py admin_trazos.py admin_version.py tts_backend.py "$HOST:${WEBDIR}/"
-# Scraper (metrobus-push, /home/ubuntu): push_metrobus.py (escribe el estado Metrobus)
-scp -i "$KEY" push_metrobus.py "$HOST:/home/ubuntu/push_metrobus.py"
+# + metrobus_scrape_cache.py + internal_metrobus_scrape.py: webhook que recibe el scraping de
+# Metrobus del Lambda externo (geomb-metrobus-scraper-lambda, mx-central-1) y el cache que
+# push_metrobus.py lee en vez de raspar el mismo (ver sus comentarios de cabecera).
+scp -i "$KEY" app.py admin_afect.py push_metrobus.py admin_trazos.py admin_version.py tts_backend.py \
+    metrobus_scrape_cache.py internal_metrobus_scrape.py "$HOST:${WEBDIR}/"
+# Scraper (metrobus-push, /home/ubuntu): push_metrobus.py (escribe el estado Metrobus) +
+# metrobus_scrape_cache.py -- push_metrobus.py lo importa, y este servicio corre APARTE del web
+# (systemd metrobus-push), así que necesita su propia copia o truena el import al arrancar.
+scp -i "$KEY" push_metrobus.py metrobus_scrape_cache.py "$HOST:/home/ubuntu/"
 # Feed Mexibus (/opt/geomb-afect): via /tmp + sudo
 scp -i "$KEY" mexibus_afectaciones.py "$HOST:/tmp/mexibus_afectaciones.py"
 ssh -i "$KEY" "$HOST" "sudo cp /tmp/mexibus_afectaciones.py ${FEEDDIR}/mexibus_afectaciones.py && rm -f /tmp/mexibus_afectaciones.py"

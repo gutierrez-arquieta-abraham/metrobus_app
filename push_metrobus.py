@@ -55,6 +55,7 @@ from firebase_admin import credentials, firestore, messaging
 
 import detector_proximidad
 import device_alertas
+import metrobus_scrape_cache
 
 URL_ESTADO = ("https://incidentesmovilidad.cdmx.gob.mx/public/"
               "bandejaEstadoServicio.xhtml?idMedioTransporte=mb")
@@ -330,7 +331,9 @@ def _vigente_hoy(periodo):
 
 
 # ---------------------------------------------------------------- Estado
-def leer_estado():
+def _leer_estado_directo():
+    """Scraping DIRECTO (con el respaldo de proxies MX de _get(), arriba) -- fallback de
+    leer_estado() cuando el caché del Lambda externo no existe o está vencido."""
     filas = []
     try:
         soup = BeautifulSoup(_get(URL_ESTADO), "html.parser")
@@ -351,6 +354,17 @@ def leer_estado():
     return filas
 
 
+def leer_estado():
+    """Preferido: caché fresco que entrega el Lambda externo (mx-central-1, IP mexicana real
+    -- ver metrobus_scrape_cache.py y el repo geomb-metrobus-scraper-lambda). Si el caché no
+    existe o está vencido (Lambda caído, sin presupuesto, etc.), cae a raspar directo desde
+    AQUÍ MISMO -- nunca se queda sin dato por un Lambda caído, solo más lento/con proxy."""
+    cache = metrobus_scrape_cache.leer()
+    if cache is not None:
+        return cache.get("estado", [])
+    return _leer_estado_directo()
+
+
 def _es_normal(estado, estaciones):
     e, s = _norm(estado), _norm(estaciones)
     return (not e) or ("servicio regular" in e) or (e == "estado") \
@@ -358,8 +372,9 @@ def _es_normal(estado, estaciones):
 
 
 # ---------------------------------------------------------------- Elevadores / mantenimiento
-def leer_tablas():
-    """Del HTML de ServicioMB: elevadores (Línea N …) y mantenimiento (Periodo …)."""
+def _leer_tablas_directo():
+    """Scraping DIRECTO -- fallback de leer_tablas() cuando el caché del Lambda externo no
+    existe o está vencido (ver leer_estado())."""
     eleva, manten = [], []
     try:
         soup = BeautifulSoup(_get(URL_SERVICIOMB), "html.parser")
@@ -385,6 +400,14 @@ def leer_tablas():
     except Exception as e:
         print("push: error tablas:", e)
     return eleva, manten
+
+
+def leer_tablas():
+    """Preferido: caché fresco del Lambda externo (ver leer_estado()). Si no, raspa directo."""
+    cache = metrobus_scrape_cache.leer()
+    if cache is not None:
+        return cache.get("eleva", []), cache.get("manten", [])
+    return _leer_tablas_directo()
 
 
 # ---------------------------------------------------------------- Ciclo

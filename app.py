@@ -170,6 +170,15 @@ except Exception as _e:
     _ACCOUNT_DISPONIBLE = False
     print(f'[account] blueprint no cargado: {_e}', flush=True)
 
+# Webhook del Lambda externo de scraping de Metrobús (mx-central-1, IP mexicana real):
+# POST /internal/metrobus_scrape -- ver internal_metrobus_scrape.py. push_metrobus.py lee el
+# caché que este endpoint escribe en vez de raspar él mismo, cuando el caché está fresco.
+try:
+    from internal_metrobus_scrape import internal_scrape_bp
+    app.register_blueprint(internal_scrape_bp)
+except Exception as _e:
+    print(f'[internal_metrobus_scrape] blueprint no cargado: {_e}', flush=True)
+
 
 # Rechaza (426 Upgrade Required) las llamadas de una app MÁS VIEJA que la versión mínima vigente
 # (ver admin_version.py) -- cinturón y tirantes junto con el bloqueo que hace la propia app al
