@@ -33,3 +33,8 @@ account_deletion.db
 # Sistema
 .DS_Store
 Thumbs.db
+
+# Datos que escriben los servicios en el EC2 (no van al repo)
+data/afect_manual.json
+data/afect_metrobus.json
+data/afectaciones_mexibus.json
